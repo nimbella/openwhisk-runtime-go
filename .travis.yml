@@ -22,40 +22,26 @@ go:
 services:
   - docker
 
-notifications:
-  email: false
-  webhooks:
-    urls:
-      # travis2slack webhook to enable DMs on openwhisk-team.slack.com to PR authors with TravisCI results
-      secure: "y7X4o14tYXdXamm4TMaWovlVBPRFusqF/DwpE62pkxPS6lkTz1qcMkocfqlQf4Q6U8CJLF9ssiGc6S5BWu4+1csY1uLpIyisQ08IT9Rkk4Rf27WG+QmFfX8Izcvz005jheYaKYKHm4GUGVpOJuNEH0Q+fpZY0dRqRXKnbG3cyzNosEC5KcaxUBh0LDLzzH4eI6h0ijK5l2JleeHbriW85QIDexV6YoMmUB0zL3j5t5gQWsz0XGo+i+n3hA5IRcJx6SjwB0LpULnh5WSQaPNp1WW+tB/xNVVRRLGj+aLMfnbhUplHZDaVD3qcRgklrWXOH0PszauyO6D7Sv87ma3fmETgI4yIo9eSGFGpVMH2cIMM6wZ55aFfga/VeLe5VxuN0IR+w6s2ed9mBCOxPcT6dgIvZMuV2jAEcQnnqg6oggtUrItUFfKSqGy6l5Alz2BpH4xdpJ1qVKw/FdvbFt2JZ0eD0fhwA7oabwl1zo3BEPAQX+opVwEAPkerPpGrEK9JgW97VwsAb9XfQ/o0jzhJAttbB2I8E9eaJqbOx1xA421ZtcJ6kLY9mmufL3XwL8X5stLhuPaAkEmOGFBL5/m+f2os8xdAGskaAh81AjTzgpzv/pGllGlgJrozeG/qtMKDYHaT/3Lq6A3VofDY9XB6CzwTs+3AoEGIVfw3sa6cRLA="
-
 before_install:
   - "./tools/travis/setup.sh"
+
 install: true
 script:
   - "./tools/travis/scan.sh && ./tools/travis/build.sh && ./tools/travis/test.sh"
+
 after_failure: cat .gogradle/reports/test/index.html
+
 deploy:
   - provider: script
     skip_cleanup: true
-    script: "./tools/travis/publish.sh openwhisk ${TRAVIS_TAG%@*} ${TRAVIS_TAG##*@}"
+    script: "./tools/travis/publish.sh nimbella ${TRAVIS_TAG%@*} ${TRAVIS_TAG##*@}"
     on:
       tags: true
       all_branches: true
-      repo: apache/openwhisk-runtime-go
+      repo: nimbella-corp/openwhisk-runtime-go
   - provider: script
     skip_cleanup: true
-    script: "./tools/travis/publish.sh openwhisk actionloop nightly"
+    script: "./tools/travis/publish.sh nimbella 1.12 nightly && ./tools/travis/publish.sh nimbella 1.15 nightly"
     on:
-      branch: master
-      repo: apache/openwhisk-runtime-go
-  - provider: script
-    skip_cleanup: true
-    script: "./tools/travis/publish.sh openwhisk 1.13 nightly && ./tools/travis/publish.sh openwhisk 1.15 nightly"
-    on:
-      branch: master
-      repo: apache/openwhisk-runtime-go
-env:
-  global:
-    - secure: GNKMZjEW1BKBb8NSiFB/Bogh0V5co5TefLLaj9oYJrKCP8rheFY4mWwINR74dYwSFIVmBhuuwZCm62zZwzb2TTivjQihOwU9SeTaUvJHlcLu6j1T/gTcMX5dkDOrdzqZaKoU5NpMbvad1fnDfEG9oU/VE7fARAxziZ2yBXOGkt2p2whkGXrs43gMyRKJv7ytUwpjvzhD48hJHgn0Eq6EwVIYxO5gJfGAhiA0ucH75c3jI4yEz7sw7SaoFxAQRL7VICaTH8JI+tKWU673HCclIRiPeZWQ23rI/f3MV8SNTKJm0GtnjM8LA9uC96qV6f5aXMn1EdaMGoCQbR9jBeqZG7pq8O2QHA/1eNNDw5sCISS05plCJ2yz/G4PUndnuToKm/sx6/qbdRA3QzTrNQfwTTcuUi+j4mYEFANgT774CeGdnajfNy4cZoeVEFmBTXdi5V1DuFLujSQrzRSHddHHUQXGUMaz4qv5R8g2aQNNJzYfknGwG0AbqCKld5j3VNtrjpiUqPAHmAi2O1/4gNd5dM42h4ARNnX4S8M/SPqWmzTAbtXaLcJIKxsyh9Xb1FINiCDsLNiuYWHb2QIjnuiXXgQvy/F1FAn231hJOYq1p6gA0QT/WBaAE77yfDR6EKmvaoBfqUuFQgfjwDH9hdsBiPb9U1jS/74yJqMBFiyW0nU=
-    - secure: sdSLUbg6ZkZiSO/gytXd83IpJ3TD2KeFWMP60VwadEPBDJf88Wju1S9xlHSan+gOgX5wU8S5Az1wfi1njGKZTmxNHgXa/LgCgJvmdoKPIHsJld5A38tvK3t1qeOzrM7UpzwdqqrEt+Xl6AlxCE82293IznOgCWaaLfBc5TawCThTLGZ2XSQYbZj4Uh12twCsKIUvnHV0Kr2wHRrSDGq6r2VSniHk8w66QMNOBu6V6zxYXKNhJpoRBU6X8vMGsn9GDNr6PG1GnO0oZGDQn/dJMxUK/QAgeskVHptX8Fytnzyri6vut0JPiMbT8AtolOxzjv/7KcqhO0YdxjVy+/3sTLpCRM0zfcx8q9RbufNiBTuERDrUYb8EKqHyX4QNJEVpf+oImNsKw/8ry991OdhrG9cyzXNT+0/oS5U7C/F7gS7nqb/kjBP+qJ+6AwdnOU1re5brv7BkH9Rj6d6tVLfSG35gRXAuwoouh6iXgXDiPu5dLNWzwazyEiIw2Pr10QWdZGJ7EwqJiPdw640wevfk8WQiwkCyduyII6OYMdZUwAjEDP4sehHoP61WPz2k8ollfiUIoTjzRrF9eO0Ni0qnz0/lBUw9zSpMZbD46KG5v/29dRLrvj9NYNAUx2KU57O080gZxIBgp1eI3WOX/Imia1phsZkP4Q7wtID03UOsiPs=
+      branch: dev-2020-10-10
+      repo: nimbella-corp/openwhisk-runtime-go
