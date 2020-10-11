@@ -20,6 +20,7 @@ apply from: '../gradle/docker.gradle'
 
 distDocker.dependsOn 'staticBuildProxy'
 distDocker.dependsOn 'copyCompiler'
+distDocker.dependsOn 'copyRemoteBuilder'
 distDocker.dependsOn 'copyEpilogue'
 distDocker.finalizedBy('cleanup')
 
@@ -41,6 +42,11 @@ task copyCompiler(type: Copy) {
     into '.'
 }
 
+task copyRemoteBuilder(type: Copy) {
+    from '../common/defaultBuild'
+    into '.'
+}
+
 task copyEpilogue(type: Copy) {
     from '../common/gobuild.py.launcher.go'
     into '.'
@@ -48,6 +54,7 @@ task copyEpilogue(type: Copy) {
 
 task cleanup(type: Delete) {
     delete 'proxy'
+    delete 'defaultBuild'
     delete 'gobuild.py'
     delete 'gobuild.py.launcher.go'
 }
