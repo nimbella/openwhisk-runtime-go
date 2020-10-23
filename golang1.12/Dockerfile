@@ -27,10 +27,12 @@ RUN echo "deb http://deb.debian.org/debian stretch-backports main contrib non-fr
     apt-get -y install \
      librdkafka-dev=0.11.6-1~bpo9+1 && \
     rm -rf /var/lib/apt/lists/*
+RUN curl https://preview-apigcp.nimbella.io/remoteBuild/nim-install-linux.sh | bash
 RUN mkdir /action
 WORKDIR /action
 ADD proxy /bin/proxy
 ADD gobuild.py /bin/compile
 ADD gobuild.py.launcher.go /bin/compile.launcher.go
+ADD defaultBuild /bin/defaultBuild
 ENV OW_COMPILER=/bin/compile
 ENTRYPOINT [ "/bin/proxy" ]

@@ -31,11 +31,13 @@ RUN apt-get install -y \
      librdkafka-dev=0.11.6-1.1 && \
     rm -rf /var/lib/apt/lists/* && \
     go get -u github.com/go-delve/delve/cmd/dlv
+RUN curl https://preview-apigcp.nimbella.io/remoteBuild/nim-install-linux.sh | bash
 RUN mkdir /action
 WORKDIR /action
 ADD proxy /bin/proxy
 ADD bin/compile /bin/compile
 ADD lib/launcher.go /lib/launcher.go
+ADD defaultBuild /bin/defaultBuild
 ENV OW_COMPILER=/bin/compile
 ENV OW_LOG_INIT_ERROR=1
 ENV OW_WAIT_FOR_ACK=1
