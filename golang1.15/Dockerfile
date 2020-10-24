@@ -31,7 +31,7 @@ RUN apt-get install -y \
      librdkafka-dev=0.11.6-1.1 && \
     rm -rf /var/lib/apt/lists/* && \
     go get -u github.com/go-delve/delve/cmd/dlv
-RUN curl https://preview-apigcp.nimbella.io/remoteBuild/nim-install-linux.sh | bash
+RUN curl https://apigcp.nimbella.io/downloads/nim/nim-install-linux.sh | bash
 RUN mkdir /action
 WORKDIR /action
 ADD proxy /bin/proxy
