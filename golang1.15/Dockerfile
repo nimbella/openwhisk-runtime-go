@@ -41,5 +41,4 @@ ADD defaultBuild /bin/defaultBuild
 ENV OW_COMPILER=/bin/compile
 ENV OW_LOG_INIT_ERROR=1
 ENV OW_WAIT_FOR_ACK=1
-ENV OW_EXECUTION_ENV=openwhisk/action-golang-v1.15
 ENTRYPOINT [ "/bin/proxy" ]
