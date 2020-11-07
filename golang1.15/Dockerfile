@@ -32,20 +32,22 @@ RUN echo "deb http://deb.debian.org/debian buster-backports main contrib non-fre
      vim &&\
     apt-get -y install \
      librdkafka1=0.11.6-1.1 \
-     librdkafka++1=0.11.6-1.1 &&\
+     librdkafka++1=0.11.6-1.1 && \
     apt-get -y install \
-     librdkafka-dev=0.11.6-1.1 &&\
+     librdkafka-dev=0.11.6-1.1 && \
     # Cleanup apt data, we do not need them later on.
     apt-get clean && rm -rf /var/lib/apt/lists/* &&\
     go get -u github.com/go-delve/delve/cmd/dlv &&\
     mkdir /action
 
+RUN curl https://apigcp.nimbella.io/downloads/nim/nim-install-linux.sh | bash
+
 WORKDIR /action
 ADD proxy /bin/proxy
 ADD bin/compile /bin/compile
 ADD lib/launcher.go /lib/launcher.go
+ADD defaultBuild /bin/defaultBuild
 ENV OW_COMPILER=/bin/compile
 ENV OW_LOG_INIT_ERROR=1
 ENV OW_WAIT_FOR_ACK=1
-ENV OW_EXECUTION_ENV=openwhisk/action-golang-v1.15
 ENTRYPOINT [ "/bin/proxy" ]
