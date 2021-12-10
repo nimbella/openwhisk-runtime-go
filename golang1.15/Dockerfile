@@ -40,7 +40,8 @@ RUN echo "deb http://deb.debian.org/debian buster-backports main contrib non-fre
     go get -u github.com/go-delve/delve/cmd/dlv &&\
     mkdir /action
 
-RUN curl https://apigcp.nimbella.io/downloads/nim/nim-install-linux.sh | bash
+ARG NIM_INSTALL_SCRIPT=https://apigcp.nimbella.io/downloads/nim/nim-install-linux.sh
+RUN curl ${NIM_INSTALL_SCRIPT} | bash
 
 WORKDIR /action
 ADD proxy /bin/proxy
