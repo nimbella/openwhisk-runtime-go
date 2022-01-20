@@ -28,6 +28,7 @@ RUN echo "deb http://deb.debian.org/debian stretch-backports main contrib non-fr
      librdkafka-dev=0.11.6-1~bpo9+1 && \
     rm -rf /var/lib/apt/lists/*
 ARG NIM_INSTALL_SCRIPT=https://apigcp.nimbella.io/downloads/nim/nim-install-linux.sh
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN curl ${NIM_INSTALL_SCRIPT} | bash
 RUN mkdir /action
 WORKDIR /action
