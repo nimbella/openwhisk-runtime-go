@@ -38,6 +38,7 @@ RUN echo "deb http://deb.debian.org/debian buster-backports main contrib non-fre
     mkdir /action
 
 ARG NIM_INSTALL_SCRIPT=https://apigcp.nimbella.io/downloads/nim/nim-install-linux.sh
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN curl ${NIM_INSTALL_SCRIPT} | bash
 
 WORKDIR /action
