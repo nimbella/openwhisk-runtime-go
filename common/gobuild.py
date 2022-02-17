@@ -55,7 +55,7 @@ def build(parent, source_dir, target):
     # compile...
     env = {
       "PATH": os.environ["PATH"],
-      "GOPATH": os.path.abspath(parent),
+      "GOPATH": os.environ["HOME"]+"/go",
       "GOCACHE": "/tmp",
       "GO111MODULE": "off"
     }
