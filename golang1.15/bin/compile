@@ -76,7 +76,7 @@ def build(source_dir, target_dir):
 
     env = {
       "GOROOT": "/usr/local/go",
-      "GOPATH": "/home/go",
+      "GOPATH": os.environ["HOME"]+"/go",
       "PATH": os.environ["PATH"],
       "GOCACHE": "/tmp",
       "GO111MODULE": "on"

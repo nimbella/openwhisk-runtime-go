@@ -72,6 +72,9 @@ func NewActionProxy(baseDir string, compiler string, outFile *os.File, errFile *
 
 //SetEnv sets the environment
 func (ap *ActionProxy) SetEnv(env map[string]interface{}) {
+	// Propagate some basic runtime environment
+	ap.env["HOME"] = os.Getenv("HOME")
+
 	// Propagate proxy version
 	ap.env["__OW_PROXY_VERSION"] = Version
 	// propagate OW_EXECUTION_ENV as  __OW_EXECUTION_ENV
@@ -190,9 +193,9 @@ func (ap *ActionProxy) ExtractAndCompileIO(r io.Reader, w io.Writer, main string
 
 	envMap := make(map[string]interface{})
 	if env != "" {
-	    json.Unmarshal([]byte(env), &envMap)
+		json.Unmarshal([]byte(env), &envMap)
 	}
-    ap.SetEnv(envMap)
+	ap.SetEnv(envMap)
 
 	// extract and compile it
 	file, err := ap.ExtractAndCompile(&in, main)
