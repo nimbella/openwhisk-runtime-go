@@ -17,8 +17,15 @@
 package openwhisk
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 var m = map[string]string{}
@@ -138,4 +145,88 @@ func ExampleNewExecutor_helloack() {
 	// <nil>
 	// {"hello": "Mike"}
 	// msg=hello Mike
+}
+
+func TestExecutorRemoteLogging(t *testing.T) {
+	tmp := t.TempDir()
+	stdout, _ := ioutil.TempFile(tmp, "stdout")
+	stderr, _ := ioutil.TempFile(tmp, "stderr")
+
+	lines := make(chan LogLine, 2) // We expect 2 lines being logged.
+	proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", map[string]string{"LOG_DESTINATION_SERVICE": "logtail", "LOGTAIL_SOURCE_TOKEN": "foo"})
+	proc.remoteLogger = testLogger(func(l LogLine) error {
+		l.Time = time.Time{} // Nullify to support comparison below.
+		lines <- l
+		return nil
+	})
+	assert.NoError(t, proc.Start(true), "failed to launch process")
+
+	_, err := proc.Interact([]byte(`{"value":{"name":"Markus"}, "activation_id": "testid", "action_name": "testaction"}`))
+	assert.NoError(t, err, "failed to interact with process")
+
+	// The streams are technically not guaranteed to arrive in order, so we have to
+	// collect them asynchronous and compare ignoring the order.
+	var got []LogLine
+	for i := 0; i < 2; i++ {
+		got = append(got, <-lines)
+	}
+	assert.ElementsMatch(t, []LogLine{{
+		Stream:       "stdout",
+		Message:      "hello from stdout",
+		ActionName:   "testaction",
+		ActivationId: "testid",
+	}, {
+		Stream:       "stderr",
+		Message:      "hello from stderr",
+		ActionName:   "testaction",
+		ActivationId: "testid",
+	}}, got)
+
+	proc.Stop()
+
+	// On the actual stdout and stderr, there should only be the log notice and the
+	// sentinels.
+	assert.Equal(t, []string{remoteLogNotice, logSentinel}, fileToLines(stdout), "local stdout not as expected")
+	assert.Equal(t, []string{logSentinel}, fileToLines(stderr), "local stderr not as expected")
+}
+
+func TestExecutorRemoteLoggingError(t *testing.T) {
+	tmp := t.TempDir()
+	stdout, err := ioutil.TempFile(tmp, "stdout")
+	assert.NoError(t, err, "failed to create stdout file")
+	stderr, err := ioutil.TempFile(tmp, "stderr")
+	assert.NoError(t, err, "failed to create stderr file")
+
+	proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", map[string]string{"LOG_DESTINATION_SERVICE": "logtail", "LOGTAIL_SOURCE_TOKEN": "foo"})
+	proc.remoteLogger = testLogger(func(l LogLine) error {
+		return errors.New("an error")
+	})
+	assert.NoError(t, proc.Start(true), "failed to launch process")
+
+	_, err = proc.Interact([]byte(`{"value":{"name":"Markus"}}`))
+	assert.NoError(t, err, "failed to interact with process")
+
+	proc.Stop()
+
+	assert.Equal(t, []string{remoteLogNotice, logSentinel}, fileToLines(stdout), "local stdout not as expected")
+	assert.Equal(t, []string{"Failed to process logs: failed to send log to remote location: an error", logSentinel}, fileToLines(stderr), "local stderr not as expected")
+}
+
+type testLogger func(LogLine) error
+
+func (l testLogger) Send(line LogLine) error {
+	return l(line)
+}
+
+func (l testLogger) Flush() error {
+	return nil
+}
+
+func fileToLines(file *os.File) []string {
+	buf, _ := ioutil.ReadFile(file.Name())
+	lines := strings.Split(string(buf), "\n")
+	if len(lines) > 1 && lines[len(lines)-1] == "" {
+		return lines[:len(lines)-1]
+	}
+	return lines
 }
