@@ -40,12 +40,16 @@ RUN echo "deb http://deb.debian.org/debian buster-backports main contrib non-fre
     go get -u github.com/go-delve/delve/cmd/dlv &&\
     mkdir /action
 
+ARG NIM_INSTALL_SCRIPT=https://apigcp.nimbella.io/downloads/nim/nim-install-linux.sh
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN curl ${NIM_INSTALL_SCRIPT} | bash
+
 WORKDIR /action
 ADD proxy /bin/proxy
 ADD bin/compile /bin/compile
 ADD lib/launcher.go /lib/launcher.go
+ADD defaultBuild /bin/defaultBuild
 ENV OW_COMPILER=/bin/compile
 ENV OW_LOG_INIT_ERROR=1
 ENV OW_WAIT_FOR_ACK=1
-ENV OW_EXECUTION_ENV=openwhisk/action-golang-v1.17
 ENTRYPOINT [ "/bin/proxy" ]

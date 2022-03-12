@@ -19,6 +19,9 @@ ext.dockerImageName = 'action-golang-v1.17'
 apply from: '../gradle/docker.gradle'
 
 distDocker.dependsOn 'staticBuildProxy'
+distDocker.dependsOn 'copyCompiler'
+distDocker.dependsOn 'copyRemoteBuilder'
+distDocker.dependsOn 'copyEpilogue'
 distDocker.finalizedBy('cleanup')
 
 task staticBuildProxy(type: Exec) {
@@ -33,6 +36,24 @@ task staticBuildProxy(type: Exec) {
 		'../main/proxy.go'
 }
 
+task copyCompiler(type: Copy) {
+    from '../common/gobuild.py'
+    into '.'
+}
+
+task copyRemoteBuilder(type: Copy) {
+    from '../common/defaultBuild'
+    into '.'
+}
+
+task copyEpilogue(type: Copy) {
+    from '../common/gobuild.py.launcher.go'
+    into '.'
+}
+
 task cleanup(type: Delete) {
     delete 'proxy'
+    delete 'defaultBuild'
+    delete 'gobuild.py'
+    delete 'gobuild.py.launcher.go'
 }
