@@ -83,16 +83,17 @@ def build(source_dir, target_dir):
     }
 
     gomod = "%s/go.mod" % source_dir
-    if exists(gomod):
-        ret = subprocess.call(["go", "mod", "download"], cwd=source_dir, env=env)
-        if ret != 0:
-            print("cannot download modules")
-            sys.exit(ret)
-    else:
-        ret = subprocess.call(["go", "mod", "init", "exec"], cwd=source_dir, env=env)
-        if ret != 0:
-            print("cannot init modules")
-            sys.exit(ret)
+    with open(os.devnull, "w") as dn:
+        if exists(gomod):
+            ret = subprocess.call(["go", "mod", "download"], cwd=source_dir, env=env, stderr=dn, stdout=dn)
+            if ret != 0:
+                print("cannot download modules")
+                return
+        else:
+            ret = subprocess.call(["go", "mod", "init", "exec"], cwd=source_dir, env=env, stdout=dn, stderr=dn)
+            if ret != 0:
+                print("cannot init modules")
+                return
 
     ldflags = "-s -w"
     gobuild = ["go", "build", "-o", target, "-ldflags", ldflags]
@@ -101,7 +102,6 @@ def build(source_dir, target_dir):
     ret = subprocess.call(gobuild, cwd=source_dir, env=env)
     if ret != 0:
         print("failed", " ".join(gobuild), "\nin", source_dir, "\nenv", env)
-        sys.exit(ret)
 
 def debug(source_dir, target_dir, port):
     source_dir = os.path.abspath(source_dir)
