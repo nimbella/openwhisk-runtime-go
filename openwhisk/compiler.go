@@ -61,11 +61,8 @@ func (ap *ActionProxy) CompileAction(main string, srcDir string, binDir string) 
 	// gather stdout and stderr
 	out, err := cmd.CombinedOutput()
 	Debug("compiler out: %s, %v", out, err)
-	if len(out) > 0 {
-		return fmt.Errorf("%s", out)
-	}
 	if err != nil {
-		return err
+		return fmt.Errorf("%s", out)
 	}
 	return nil
 }
