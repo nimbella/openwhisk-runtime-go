@@ -118,5 +118,8 @@ func main() {
 			log.Printf("<<<'%s'<<<", output)
 		}
 		fmt.Fprintf(out, "%s\n", output)
+
+		fmt.Fprintln(os.Stdout, "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX")
+		fmt.Fprintln(os.Stderr, "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX")
 	}
 }

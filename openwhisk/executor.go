@@ -101,8 +101,6 @@ func (proc *Executor) Interact(in []byte) ([]byte, error) {
 	case <-proc.exited:
 		err = errors.New("command exited")
 	}
-	proc.cmd.Stdout.Write([]byte(OutputGuard))
-	proc.cmd.Stderr.Write([]byte(OutputGuard))
 	return out, err
 }
 

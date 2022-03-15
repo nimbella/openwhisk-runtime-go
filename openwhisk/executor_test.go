@@ -60,8 +60,6 @@ func ExampleNewExecutor_bc() {
 	// Output:
 	// <nil>
 	// 4
-	// XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX
-	// XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX
 }
 
 func ExampleNewExecutor_hello() {
@@ -77,8 +75,6 @@ func ExampleNewExecutor_hello() {
 	// <nil>
 	// {"hello": "Mike"}
 	// msg=hello Mike
-	// XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX
-	// XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX
 }
 
 func ExampleNewExecutor_env() {
@@ -93,8 +89,6 @@ func ExampleNewExecutor_env() {
 	// Output:
 	// <nil>
 	// { "env": "TEST_HELLO=WORLD TEST_HI=ALL"}
-	// XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX
-	// XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX
 }
 
 func ExampleNewExecutor_ack() {
@@ -144,6 +138,4 @@ func ExampleNewExecutor_helloack() {
 	// <nil>
 	// {"hello": "Mike"}
 	// msg=hello Mike
-	// XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX
-	// XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX
 }
