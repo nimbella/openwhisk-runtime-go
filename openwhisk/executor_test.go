@@ -201,7 +201,7 @@ func TestExecutorRemoteLoggingError(t *testing.T) {
 	proc.Stop()
 
 	assert.Equal(t, []string{remoteLogNotice, logSentinel}, fileToLines(stdout), "local stdout not as expected")
-	assert.Equal(t, []string{"Failed to process logs: failed to send log to remote location: an error", logSentinel}, fileToLines(stderr), "local stderr not as expected")
+	assert.Equal(t, []string{"Failed to process logs: 2 errors occurred:", "\t* an error", "\t* an error", logSentinel}, fileToLines(stderr), "local stderr not as expected")
 }
 
 func TestExecutorRemoteLoggingSetupErrors(t *testing.T) {

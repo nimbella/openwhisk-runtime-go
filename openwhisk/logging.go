@@ -75,10 +75,6 @@ type RemoteLogger interface {
 	// Send sends a logline to the remote service. Implementations can choose to batch
 	// lines.
 	Send(LogLine) error
-
-	// Flush force sends all potentially batched lines. This can be used to hurry up
-	// sending at the end of an activation.
-	Flush() error
 }
 
 // httpLogger sends a logline per HTTP request. No batching is done.
@@ -114,10 +110,5 @@ func (l *httpLogger) Send(line LogLine) error {
 	if res.StatusCode >= 300 {
 		return fmt.Errorf("failed to ingest log line, code: %d", res.StatusCode)
 	}
-	return nil
-}
-
-func (l *httpLogger) Flush() error {
-	// Nothing to flush. We're sending per line anyway.
 	return nil
 }

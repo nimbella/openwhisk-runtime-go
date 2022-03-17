@@ -27,8 +27,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -191,6 +193,13 @@ func (proc *Executor) Interact(in []byte) ([]byte, error) {
 		return proc.roundtrip(in)
 	}
 
+	defer func() {
+		// Write our own sentinels instead of forwarding from the child. This makes sure that any
+		// error logs we might've written are captured correctly.
+		proc.logout.WriteString(OutputGuard)
+		proc.logerr.WriteString(OutputGuard)
+	}()
+
 	// Fetch metadata from the incoming parameters
 	var metadata activationMetadata
 	if err := json.Unmarshal(in, &metadata); err != nil {
@@ -200,7 +209,7 @@ func (proc *Executor) Interact(in []byte) ([]byte, error) {
 	var grp errgroup.Group
 	grp.Go(func() error {
 		var sawStdoutSentinel, sawStdErrSentinel bool
-		var lastErr error
+		var errors error
 		for line := range proc.lines {
 			if line.Message == logSentinel {
 				if line.Stream == "stdout" {
@@ -210,7 +219,7 @@ func (proc *Executor) Interact(in []byte) ([]byte, error) {
 				}
 				if sawStdoutSentinel && sawStdErrSentinel {
 					// We've seen both sentinels. Stop consuming until the next request.
-					return lastErr
+					return errors
 				}
 				continue
 			}
@@ -220,10 +229,10 @@ func (proc *Executor) Interact(in []byte) ([]byte, error) {
 			if err := proc.remoteLogger.Send(line); err != nil {
 				// We want to continue consuming all of the logs so we don't exit immediately
 				// but surface the error eventually.
-				lastErr = fmt.Errorf("failed to send log to remote location: %w", err)
+				errors = multierror.Append(errors, err)
 			}
 		}
-		return lastErr
+		return errors
 	})
 
 	proc.logout.WriteString(remoteLogNotice)
@@ -232,17 +241,8 @@ func (proc *Executor) Interact(in []byte) ([]byte, error) {
 
 	// Wait for the streams to process completely.
 	if err := grp.Wait(); err != nil {
-		fmt.Fprintf(proc.logerr, "Failed to process logs: %v\n", err)
+		fmt.Fprintf(proc.logerr, "Failed to process logs: %s\n", strings.TrimSpace(err.Error()))
 	}
-
-	if err := proc.remoteLogger.Flush(); err != nil {
-		fmt.Fprintf(proc.logerr, "Failed to flush logs to remote location: %v\n", err)
-	}
-
-	// Write our own sentinels instead of forwarding from the child. This makes sure that any
-	// error logs we might've written are captured correctly.
-	proc.logout.WriteString(OutputGuard)
-	proc.logerr.WriteString(OutputGuard)
 
 	return out, err
 }
