@@ -50,7 +50,7 @@ func FormatDatadog(l LogLine) ([]byte, error) {
 			// Fall back to a raw line if the JSON can't be parsed.
 			return formatDatadogRaw(l)
 		}
-		current["date"] = l.Time.UnixMilli()
+		current["date"] = l.Time.UnixNano() / int64(time.Millisecond)
 		current["ddsource"] = l.ActionName
 		current["ddtags"] = fmt.Sprintf("host:%s,activationid:%s", l.ActionName, l.ActivationId)
 		current["service"] = l.ActionName
@@ -64,7 +64,7 @@ func FormatDatadog(l LogLine) ([]byte, error) {
 func formatDatadogRaw(l LogLine) ([]byte, error) {
 	return json.Marshal(DatadogLogLine{
 		Message: l.Message,
-		Date:    l.Time.UnixMilli(),
+		Date:    l.Time.UnixNano() / int64(time.Millisecond),
 		Source:  l.ActionName,
 		Service: l.ActionName,
 		Tags:    fmt.Sprintf("host:%s,activationid:%s", l.ActionName, l.ActivationId),
