@@ -204,7 +204,7 @@ func TestExecutorRemoteLoggingError(t *testing.T) {
 	assert.Equal(t, []string{"Failed to process logs: failed to send log to remote location: an error", logSentinel}, fileToLines(stderr), "local stderr not as expected")
 }
 
-func TestExecutorRemoteLoggingSetupErrorsLogtail(t *testing.T) {
+func TestExecutorRemoteLoggingSetupErrors(t *testing.T) {
 	tests := []struct {
 		service       string
 		wantErrorLine string
