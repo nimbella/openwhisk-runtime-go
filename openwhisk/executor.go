@@ -33,10 +33,18 @@ import (
 )
 
 // OutputGuard constant string
-const logSentinel = "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX"
-const OutputGuard = logSentinel + "\n"
+const (
+	logSentinel = "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX"
+	OutputGuard = logSentinel + "\n"
 
-const remoteLogNotice = "Logs will be written to the specified remote location. Only errors in doing so will be surfaced here."
+	remoteLogNotice = "Logs will be written to the specified remote location. Only errors in doing so will be surfaced here."
+
+	logDestinationServiceEnv = "LOG_DESTINATION_SERVICE"
+	logtailTokenEnv          = "LOGTAIL_SOURCE_TOKEN"
+	papertrailTokenEnv       = "PAPERTRAIL_TOKEN"
+	datadogSiteEnv           = "DD_SITE"
+	datadogApiKeyEnv         = "DD_API_KEY"
+)
 
 // DefaultTimeoutStart to wait for a process to start
 var DefaultTimeoutStart = 5 * time.Millisecond
@@ -96,9 +104,9 @@ func NewExecutor(logout *os.File, logerr *os.File, command string, env map[strin
 		logerr: logerr,
 	}
 
-	// TODO: Where to surface configuration errors (unsupported destinations etc)? Ideally at action creation time.
-	if env["LOG_DESTINATION_SERVICE"] != "" {
+	if env[logDestinationServiceEnv] != "" {
 		if err := e.setupRemoteLogging(env); err != nil {
+			fmt.Fprintf(logerr, "Failed to setup remote logging: %v\n", err)
 			return nil
 		}
 	}
@@ -127,26 +135,38 @@ func (proc *Executor) setupRemoteLogging(env map[string]string) error {
 	}
 	proc.consumeGrp.Go(func() error { return consumeStream("stderr", stderr, proc.lines) })
 
-	// TODO: Support multiple destinations at once.
-	switch env["LOG_DESTINATION_SERVICE"] {
+	// TODO(SERVERLESS-958): Support multiple destinations at once.
+	switch env[logDestinationServiceEnv] {
 	case "logtail":
+		if env[logtailTokenEnv] == "" {
+			return fmt.Errorf("%q has to be an environment variable of the action", logtailTokenEnv)
+		}
+
 		proc.remoteLogger = &httpLogger{
 			url:     "https://in.logtail.com",
-			headers: map[string]string{"Authorization": fmt.Sprintf("Bearer %s", env["LOGTAIL_SOURCE_TOKEN"])},
+			headers: map[string]string{"Authorization": fmt.Sprintf("Bearer %s", env[logtailTokenEnv])},
 			http:    http.DefaultClient,
 			format:  FormatLogtail,
 		}
 	case "papertrail":
+		if env[papertrailTokenEnv] == "" {
+			return fmt.Errorf("%q has to be an environment variable of the action", papertrailTokenEnv)
+		}
+
 		proc.remoteLogger = &httpLogger{
 			url:     "https://logs.collector.solarwinds.com/v1/log",
-			headers: map[string]string{"Authorization": fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(":"+env["PAPERTRAIL_TOKEN"])))},
+			headers: map[string]string{"Authorization": fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(":"+env[papertrailTokenEnv])))},
 			http:    http.DefaultClient,
 			format:  FormatLogtail, // TODO: Is there a better format for papertrail?
 		}
 	case "datadog":
+		if env[datadogSiteEnv] == "" || env[datadogApiKeyEnv] == "" {
+			return fmt.Errorf("%q and %q have to be an environment variable of the action", datadogSiteEnv, datadogApiKeyEnv)
+		}
+
 		proc.remoteLogger = &httpLogger{
-			url:     fmt.Sprintf("https://http-intake.logs.%s/api/v2/logs", env["DD_SITE"]),
-			headers: map[string]string{"DD-API-KEY": env["DD_API_KEY"]},
+			url:     fmt.Sprintf("https://http-intake.logs.%s/api/v2/logs", env[datadogSiteEnv]),
+			headers: map[string]string{"DD-API-KEY": env[datadogApiKeyEnv]},
 			http:    http.DefaultClient,
 			format:  FormatDatadog,
 		}

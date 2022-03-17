@@ -148,12 +148,9 @@ func ExampleNewExecutor_helloack() {
 }
 
 func TestExecutorRemoteLogging(t *testing.T) {
-	tmp := t.TempDir()
-	stdout, _ := ioutil.TempFile(tmp, "stdout")
-	stderr, _ := ioutil.TempFile(tmp, "stderr")
-
 	lines := make(chan LogLine, 2) // We expect 2 lines being logged.
-	proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", map[string]string{"LOG_DESTINATION_SERVICE": "logtail", "LOGTAIL_SOURCE_TOKEN": "foo"})
+	stdout, stderr := testStdoutStderr(t)
+	proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", map[string]string{logDestinationServiceEnv: "logtail", logtailTokenEnv: "foo"})
 	proc.remoteLogger = testLogger(func(l LogLine) error {
 		l.Time = time.Time{} // Nullify to support comparison below.
 		lines <- l
@@ -191,25 +188,46 @@ func TestExecutorRemoteLogging(t *testing.T) {
 }
 
 func TestExecutorRemoteLoggingError(t *testing.T) {
-	tmp := t.TempDir()
-	stdout, err := ioutil.TempFile(tmp, "stdout")
-	assert.NoError(t, err, "failed to create stdout file")
-	stderr, err := ioutil.TempFile(tmp, "stderr")
-	assert.NoError(t, err, "failed to create stderr file")
-
-	proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", map[string]string{"LOG_DESTINATION_SERVICE": "logtail", "LOGTAIL_SOURCE_TOKEN": "foo"})
+	stdout, stderr := testStdoutStderr(t)
+	proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", map[string]string{logDestinationServiceEnv: "logtail", logtailTokenEnv: "foo"})
 	proc.remoteLogger = testLogger(func(l LogLine) error {
 		return errors.New("an error")
 	})
 	assert.NoError(t, proc.Start(true), "failed to launch process")
 
-	_, err = proc.Interact([]byte(`{"value":{"name":"Markus"}}`))
+	_, err := proc.Interact([]byte(`{"value":{"name":"Markus"}}`))
 	assert.NoError(t, err, "failed to interact with process")
 
 	proc.Stop()
 
 	assert.Equal(t, []string{remoteLogNotice, logSentinel}, fileToLines(stdout), "local stdout not as expected")
 	assert.Equal(t, []string{"Failed to process logs: failed to send log to remote location: an error", logSentinel}, fileToLines(stderr), "local stderr not as expected")
+}
+
+func TestExecutorRemoteLoggingSetupErrorsLogtail(t *testing.T) {
+	tests := []struct {
+		service       string
+		wantErrorLine string
+	}{{
+		service:       "logtail",
+		wantErrorLine: `Failed to setup remote logging: "LOGTAIL_SOURCE_TOKEN" has to be an environment variable of the action`,
+	}, {
+		service:       "papertrail",
+		wantErrorLine: `Failed to setup remote logging: "PAPERTRAIL_TOKEN" has to be an environment variable of the action`,
+	}, {
+		service:       "datadog",
+		wantErrorLine: `Failed to setup remote logging: "DD_SITE" and "DD_API_KEY" have to be an environment variable of the action`,
+	}}
+
+	for _, test := range tests {
+		t.Run(test.service, func(t *testing.T) {
+			stdout, stderr := testStdoutStderr(t)
+			proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", map[string]string{logDestinationServiceEnv: test.service})
+			assert.Nil(t, proc)
+			assert.Empty(t, fileToLines(stdout), "stdout wasn't empty")
+			assert.Equal(t, []string{test.wantErrorLine}, fileToLines(stderr), "stderr wasn't as expected")
+		})
+	}
 }
 
 type testLogger func(LogLine) error
@@ -222,10 +240,20 @@ func (l testLogger) Flush() error {
 	return nil
 }
 
+func testStdoutStderr(t *testing.T) (*os.File, *os.File) {
+	tmp := t.TempDir()
+	stdout, err := ioutil.TempFile(tmp, "stdout")
+	assert.NoError(t, err, "failed to create stdout file")
+	stderr, err := ioutil.TempFile(tmp, "stderr")
+	assert.NoError(t, err, "failed to create stderr file")
+
+	return stdout, stderr
+}
+
 func fileToLines(file *os.File) []string {
 	buf, _ := ioutil.ReadFile(file.Name())
 	lines := strings.Split(string(buf), "\n")
-	if len(lines) > 1 && lines[len(lines)-1] == "" {
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
 		return lines[:len(lines)-1]
 	}
 	return lines
