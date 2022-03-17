@@ -118,9 +118,6 @@ func (proc *Executor) setupRemoteLogging(env map[string]string) error {
 	// A chunky buffer in order to not block execution of the function from dealing with log lines.
 	proc.lines = make(chan LogLine, 128)
 
-	// TODO: Should we throw stdout and stderr into one bucket? We'd lose the ability to
-	// distinguish them but, I think, we'd gain the ability to ensure that the ordering is
-	// equal to how the lines are ordered in-code (if it mixes stdout and stderr).
 	proc.cmd.Stdout = nil
 	stdout, err := proc.cmd.StdoutPipe()
 	if err != nil {
