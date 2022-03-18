@@ -19,20 +19,42 @@ package openwhisk
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
+
+	"github.com/hashicorp/go-multierror"
+	"golang.org/x/sync/errgroup"
 )
 
 // OutputGuard constant string
-const OutputGuard = "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX\n"
+const (
+	logSentinel = "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX"
+	OutputGuard = logSentinel + "\n"
+
+	remoteLogNotice = "Logs will be written to the specified remote location. Only errors in doing so will be surfaced here."
+
+	logDestinationServiceEnv = "LOG_DESTINATION_SERVICE"
+	logtailTokenEnv          = "LOGTAIL_SOURCE_TOKEN"
+	papertrailTokenEnv       = "PAPERTRAIL_TOKEN"
+	datadogSiteEnv           = "DD_SITE"
+	datadogApiKeyEnv         = "DD_API_KEY"
+)
 
 // DefaultTimeoutStart to wait for a process to start
 var DefaultTimeoutStart = 5 * time.Millisecond
+
+type activationMetadata struct {
+	ActivationId string `json:"activation_id"`
+	ActionName   string `json:"action_name"`
+}
 
 // Executor is the container and the guardian  of a child process
 // It starts a command, feeds input and output, read logs and control its termination
@@ -41,6 +63,13 @@ type Executor struct {
 	input  io.WriteCloser
 	output *bufio.Reader
 	exited chan bool
+
+	lines        chan LogLine
+	consumeGrp   errgroup.Group
+	remoteLogger RemoteLogger
+
+	logout *os.File
+	logerr *os.File
 }
 
 // NewExecutor creates a child subprocess using the provided command line,
@@ -68,17 +97,158 @@ func NewExecutor(logout *os.File, logerr *os.File, command string, env map[strin
 	}
 	cmd.ExtraFiles = []*os.File{pipeIn}
 	output := bufio.NewReader(pipeOut)
-	return &Executor{
-		cmd,
-		input,
-		output,
-		make(chan bool),
+	e := &Executor{
+		cmd:    cmd,
+		input:  input,
+		output: output,
+		exited: make(chan bool),
+		logout: logout,
+		logerr: logerr,
 	}
+
+	if env[logDestinationServiceEnv] != "" {
+		if err := e.setupRemoteLogging(env); err != nil {
+			fmt.Fprintf(logerr, "Failed to setup remote logging: %v\n", err)
+			return nil
+		}
+	}
+
+	return e
+}
+
+func (proc *Executor) setupRemoteLogging(env map[string]string) error {
+	// A chunky buffer in order to not block execution of the function from dealing with log lines.
+	proc.lines = make(chan LogLine, 128)
+
+	proc.cmd.Stdout = nil
+	stdout, err := proc.cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to get stdout pipe: %w", err)
+	}
+	proc.consumeGrp.Go(func() error { return consumeStream("stdout", stdout, proc.lines) })
+
+	proc.cmd.Stderr = nil
+	stderr, err := proc.cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("failed to get stderr pipe: %w", err)
+	}
+	proc.consumeGrp.Go(func() error { return consumeStream("stderr", stderr, proc.lines) })
+
+	// TODO(SERVERLESS-958): Support multiple destinations at once.
+	switch env[logDestinationServiceEnv] {
+	case "logtail":
+		if env[logtailTokenEnv] == "" {
+			return fmt.Errorf("%q has to be an environment variable of the action", logtailTokenEnv)
+		}
+
+		proc.remoteLogger = &httpLogger{
+			url:     "https://in.logtail.com",
+			headers: map[string]string{"Authorization": fmt.Sprintf("Bearer %s", env[logtailTokenEnv])},
+			http:    http.DefaultClient,
+			format:  FormatLogtail,
+		}
+	case "papertrail":
+		if env[papertrailTokenEnv] == "" {
+			return fmt.Errorf("%q has to be an environment variable of the action", papertrailTokenEnv)
+		}
+
+		proc.remoteLogger = &httpLogger{
+			url:     "https://logs.collector.solarwinds.com/v1/log",
+			headers: map[string]string{"Authorization": fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(":"+env[papertrailTokenEnv])))},
+			http:    http.DefaultClient,
+			format:  FormatLogtail, // TODO: Is there a better format for papertrail?
+		}
+	case "datadog":
+		if env[datadogSiteEnv] == "" || env[datadogApiKeyEnv] == "" {
+			return fmt.Errorf("%q and %q have to be an environment variable of the action", datadogSiteEnv, datadogApiKeyEnv)
+		}
+
+		proc.remoteLogger = &httpLogger{
+			url:     fmt.Sprintf("https://http-intake.logs.%s/api/v2/logs", env[datadogSiteEnv]),
+			headers: map[string]string{"DD-API-KEY": env[datadogApiKeyEnv]},
+			http:    http.DefaultClient,
+			format:  FormatDatadog,
+		}
+	}
+	return nil
+}
+
+// consumeStream consumes a log stream into the given channel.
+func consumeStream(streamName string, stream io.Reader, ch chan LogLine) error {
+	s := bufio.NewScanner(stream)
+	for s.Scan() {
+		ch <- LogLine{
+			Time:    time.Now(),
+			Message: s.Text(),
+			Stream:  streamName,
+		}
+	}
+	return s.Err()
 }
 
 // Interact interacts with the underlying process
 func (proc *Executor) Interact(in []byte) ([]byte, error) {
-	// input to the subprocess
+	if proc.lines == nil {
+		// Remote logging is not configured. Just roundtrip and return immediately.
+		return proc.roundtrip(in)
+	}
+
+	defer func() {
+		// Write our own sentinels instead of forwarding from the child. This makes sure that any
+		// error logs we might've written are captured correctly.
+		proc.logout.WriteString(OutputGuard)
+		proc.logerr.WriteString(OutputGuard)
+	}()
+
+	// Fetch metadata from the incoming parameters
+	var metadata activationMetadata
+	if err := json.Unmarshal(in, &metadata); err != nil {
+		return nil, fmt.Errorf("failed to parse activation metadata: %w", err)
+	}
+
+	var grp errgroup.Group
+	grp.Go(func() error {
+		var sawStdoutSentinel, sawStdErrSentinel bool
+		var errors error
+		for line := range proc.lines {
+			if line.Message == logSentinel {
+				if line.Stream == "stdout" {
+					sawStdoutSentinel = true
+				} else {
+					sawStdErrSentinel = true
+				}
+				if sawStdoutSentinel && sawStdErrSentinel {
+					// We've seen both sentinels. Stop consuming until the next request.
+					return errors
+				}
+				continue
+			}
+
+			line.ActivationId = metadata.ActivationId
+			line.ActionName = metadata.ActionName
+			if err := proc.remoteLogger.Send(line); err != nil {
+				// We want to continue consuming all of the logs so we don't exit immediately
+				// but surface the error eventually.
+				errors = multierror.Append(errors, err)
+			}
+		}
+		return errors
+	})
+
+	proc.logout.WriteString(remoteLogNotice)
+	proc.logout.WriteString("\n")
+	out, err := proc.roundtrip(in)
+
+	// Wait for the streams to process completely.
+	if err := grp.Wait(); err != nil {
+		fmt.Fprintf(proc.logerr, "Failed to process logs: %s\n", strings.TrimSpace(err.Error()))
+	}
+
+	return out, err
+}
+
+// roundtrip writes the input to the subprocess and waits for a response.
+func (proc *Executor) roundtrip(in []byte) ([]byte, error) {
 	proc.input.Write(in)
 	proc.input.Write([]byte("\n"))
 
@@ -190,6 +360,7 @@ func (proc *Executor) Stop() {
 	Debug("stopping")
 	if proc.cmd != nil {
 		proc.cmd.Process.Kill()
+		proc.consumeGrp.Wait()
 		proc.cmd = nil
 	}
 }
