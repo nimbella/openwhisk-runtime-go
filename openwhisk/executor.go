@@ -46,6 +46,10 @@ const (
 	papertrailTokenEnv       = "PAPERTRAIL_TOKEN"
 	datadogSiteEnv           = "DD_SITE"
 	datadogApiKeyEnv         = "DD_API_KEY"
+
+	logBatchInterval = 100 * time.Millisecond
+	// Datadog limits the size of a batch to 5 MB, so we leave some slack to that.
+	logBatchSizeLimit = 4 * 1024 * 1024
 )
 
 // DefaultTimeoutStart to wait for a process to start
@@ -141,36 +145,45 @@ func (proc *Executor) setupRemoteLogging(env map[string]string) error {
 			return fmt.Errorf("%q has to be an environment variable of the action", logtailTokenEnv)
 		}
 
-		proc.remoteLogger = &httpLogger{
-			url:     "https://in.logtail.com",
-			headers: map[string]string{"Authorization": fmt.Sprintf("Bearer %s", env[logtailTokenEnv])},
-			http:    http.DefaultClient,
-			format:  FormatLogtail,
-		}
+		logger := defaultRemoteLogger()
+		logger.url = "https://in.logtail.com"
+		logger.headers = map[string]string{"Authorization": fmt.Sprintf("Bearer %s", env[logtailTokenEnv])}
+		logger.format = FormatLogtail
+		logger.batchType = batchTypeArray
+		proc.remoteLogger = logger
 	case "papertrail":
 		if env[papertrailTokenEnv] == "" {
 			return fmt.Errorf("%q has to be an environment variable of the action", papertrailTokenEnv)
 		}
 
-		proc.remoteLogger = &httpLogger{
-			url:     "https://logs.collector.solarwinds.com/v1/log",
-			headers: map[string]string{"Authorization": fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(":"+env[papertrailTokenEnv])))},
-			http:    http.DefaultClient,
-			format:  FormatLogtail, // TODO: Is there a better format for papertrail?
-		}
+		logger := defaultRemoteLogger()
+		logger.url = "https://logs.collector.solarwinds.com/v1/logs"
+		logger.headers = map[string]string{"Authorization": fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(":"+env[papertrailTokenEnv])))}
+		logger.format = FormatLogtail // TODO: Is there a better format for papertrail?
+		logger.batchType = batchTypeNewline
+		proc.remoteLogger = logger
 	case "datadog":
 		if env[datadogSiteEnv] == "" || env[datadogApiKeyEnv] == "" {
 			return fmt.Errorf("%q and %q have to be an environment variable of the action", datadogSiteEnv, datadogApiKeyEnv)
 		}
 
-		proc.remoteLogger = &httpLogger{
-			url:     fmt.Sprintf("https://http-intake.logs.%s/api/v2/logs", env[datadogSiteEnv]),
-			headers: map[string]string{"DD-API-KEY": env[datadogApiKeyEnv]},
-			http:    http.DefaultClient,
-			format:  FormatDatadog,
-		}
+		logger := defaultRemoteLogger()
+		logger.url = fmt.Sprintf("https://http-intake.logs.%s/api/v2/logs", env[datadogSiteEnv])
+		logger.headers = map[string]string{"DD-API-KEY": env[datadogApiKeyEnv]}
+		logger.format = FormatDatadog
+		logger.batchType = batchTypeArray
+		proc.remoteLogger = logger
 	}
 	return nil
+}
+
+func defaultRemoteLogger() *batchingHttpLogger {
+	return &batchingHttpLogger{
+		http:           http.DefaultClient,
+		batchInterval:  logBatchInterval,
+		batchSizeLimit: logBatchSizeLimit,
+		execAfter:      time.AfterFunc,
+	}
 }
 
 // consumeStream consumes a log stream into the given channel.
@@ -242,6 +255,11 @@ func (proc *Executor) Interact(in []byte) ([]byte, error) {
 	// Wait for the streams to process completely.
 	if err := grp.Wait(); err != nil {
 		fmt.Fprintf(proc.logerr, "Failed to process logs: %s\n", strings.TrimSpace(err.Error()))
+	}
+
+	// Flush any potential leftovers.
+	if err := proc.remoteLogger.Flush(); err != nil {
+		fmt.Fprintf(proc.logerr, "Failed to flush logs: %s\n", strings.TrimSpace(err.Error()))
 	}
 
 	return out, err
