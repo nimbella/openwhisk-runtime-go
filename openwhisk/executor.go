@@ -47,6 +47,9 @@ const (
 	datadogSiteEnv           = "DD_SITE"
 	datadogApiKeyEnv         = "DD_API_KEY"
 
+	// This value is somewhat arbitrarily set now. It's low'ish to allow the logs to be written
+	// in parallel to the actual action running to amortize the timing cost of writing the logs
+	// to the backend.
 	logBatchInterval = 100 * time.Millisecond
 	// Datadog limits the size of a batch to 5 MB, so we leave some slack to that.
 	logBatchSizeLimit = 4 * 1024 * 1024
