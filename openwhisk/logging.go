@@ -120,13 +120,19 @@ func (l *httpLogger) Flush() error {
 	return nil
 }
 
+// batchType defines the format in which will be batched.
 type batchType int
 
 const (
+	// batchTypeArray means that the log lines are batched using JSON arrays.
 	batchTypeArray batchType = iota
+	// batchTypeNewline means that the log lines are delimited lines in the response.
 	batchTypeNewline
 )
 
+// batchingHttpLogger batches log lines according to the given batchType.
+// Batches are written out either after the given interval, if the given size limit
+// would be exceeded or if they are explicitly flushed.
 type batchingHttpLogger struct {
 	http    *http.Client
 	url     string
@@ -161,18 +167,22 @@ func (l *batchingHttpLogger) Send(line LogLine) error {
 
 	if l.batchType == batchTypeArray {
 		if l.buf.Len() == 0 {
+			// If the buffer was still empty, open the array...
 			l.buf.WriteByte('[')
 		} else {
+			// ...else delimit from the last element using a comma.
 			l.buf.WriteByte(',')
 		}
 	} else {
 		if l.buf.Len() > 0 {
+			// Prepend all logs with a newline.
 			l.buf.WriteByte('\n')
 		}
 	}
 	l.buf.Write(formatted)
 
 	if l.timer == nil {
+		// Schedule a flush if there isn't already one scheduled.
 		l.timer = l.execAfter(l.batchInterval, func() { l.Flush() })
 	}
 
@@ -184,6 +194,7 @@ func (l *batchingHttpLogger) Flush() error {
 	defer l.mux.Unlock()
 
 	if l.timer != nil {
+		// Cancel a potentially scheduled flush.
 		l.timer.Stop()
 		l.timer = nil
 	}
@@ -199,8 +210,8 @@ func (l *batchingHttpLogger) Flush() error {
 func (l *batchingHttpLogger) sendBatch() error {
 	defer l.buf.Reset()
 
-	// Write the closing bracket if we're writing
 	if l.batchType == batchTypeArray {
+		// Close the array if that's the type of batching being used.
 		l.buf.WriteByte(']')
 	}
 
