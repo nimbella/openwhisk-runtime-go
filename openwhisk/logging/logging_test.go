@@ -1,8 +1,7 @@
-package openwhisk
+package logging
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"io/ioutil"
 	"net/http"
@@ -13,34 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestFormatDatadogJSON(t *testing.T) {
-	by, err := FormatDatadog(LogLine{
-		Message:      `{"message": "foo", "attribute": "bar"}`,
-		Time:         time.Unix(0, 0),
-		Stream:       "stdout",
-		ActionName:   "testaction",
-		ActivationId: "testid",
-	})
-	assert.NoError(t, err, "failed to format log line")
-
-	var got map[string]interface{}
-	assert.NoError(t, json.Unmarshal(by, &got), "failed to unmarshal log line")
-
-	want := map[string]interface{}{
-		"message":   "foo", // This and 'attribute' are flattened into the structure.
-		"attribute": "bar",
-		"date":      float64(0), // Generic parsing transforms numbers into float64.
-		"ddtags":    "host:testaction,activationid:testid",
-		"ddsource":  "testaction",
-		"service":   "testaction",
-	}
-
-	assert.Equal(t, want, got)
-}
-
 func TestHttpLoggerSend(t *testing.T) {
 	req := make(chan *http.Request, 1)
-	format := FormatLogtail
+	format := formatLogtail
 	logger := &httpLogger{
 		http: &http.Client{Transport: testTransport(func(r *http.Request) (*http.Response, error) {
 			req <- r
@@ -72,7 +46,7 @@ func TestHttpLoggerSendError(t *testing.T) {
 		http: &http.Client{Transport: testTransport(func(r *http.Request) (*http.Response, error) {
 			return nil, errors.New("an error")
 		})},
-		format: FormatLogtail,
+		format: formatLogtail,
 	}
 
 	assert.Error(t, logger.Send(LogLine{}))
@@ -85,7 +59,7 @@ func TestHttpLoggerSendHttpError(t *testing.T) {
 			rec.WriteHeader(http.StatusUnauthorized)
 			return rec.Result(), nil
 		})},
-		format: FormatLogtail,
+		format: formatLogtail,
 	}
 
 	assert.Error(t, logger.Send(LogLine{}))
@@ -94,7 +68,7 @@ func TestHttpLoggerSendHttpError(t *testing.T) {
 func TestBatchingHttpLoggerSend(t *testing.T) {
 	bodies := make(chan string, 1)
 	scheduledFlushs := make(chan func(), 1)
-	format := FormatLogtail
+	format := formatLogtail
 	logger := &batchingHttpLogger{
 		http: &http.Client{Transport: testTransport(func(r *http.Request) (*http.Response, error) {
 			body, err := ioutil.ReadAll(r.Body)
@@ -137,7 +111,7 @@ func TestBatchingHttpLoggerSend(t *testing.T) {
 
 func TestBatchingHttpLoggerArraySend(t *testing.T) {
 	bodies := make(chan string, 1)
-	format := FormatLogtail
+	format := formatLogtail
 	logger := &batchingHttpLogger{
 		http: &http.Client{Transport: testTransport(func(r *http.Request) (*http.Response, error) {
 			body, err := ioutil.ReadAll(r.Body)
@@ -177,7 +151,7 @@ func TestBatchingHttpLoggerArraySend(t *testing.T) {
 
 func TestBatchingHttpLoggerSendExceedLimit(t *testing.T) {
 	bodies := make(chan string, 2)
-	format := FormatLogtail
+	format := formatLogtail
 	logger := &batchingHttpLogger{
 		http: &http.Client{Transport: testTransport(func(r *http.Request) (*http.Response, error) {
 			body, err := ioutil.ReadAll(r.Body)
