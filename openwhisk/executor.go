@@ -19,17 +19,16 @@ package openwhisk
 
 import (
 	"bufio"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/apache/openwhisk-runtime-go/openwhisk/logging"
 	"github.com/hashicorp/go-multierror"
 	"golang.org/x/sync/errgroup"
 )
@@ -40,19 +39,6 @@ const (
 	OutputGuard = logSentinel + "\n"
 
 	remoteLogNotice = "Logs will be written to the specified remote location. Only errors in doing so will be surfaced here."
-
-	logDestinationServiceEnv = "LOG_DESTINATION_SERVICE"
-	logtailTokenEnv          = "LOGTAIL_SOURCE_TOKEN"
-	papertrailTokenEnv       = "PAPERTRAIL_TOKEN"
-	datadogSiteEnv           = "DD_SITE"
-	datadogApiKeyEnv         = "DD_API_KEY"
-
-	// This value is somewhat arbitrarily set now. It's low'ish to allow the logs to be written
-	// in parallel to the actual action running to amortize the timing cost of writing the logs
-	// to the backend.
-	logBatchInterval = 100 * time.Millisecond
-	// Datadog limits the size of a batch to 5 MB, so we leave some slack to that.
-	logBatchSizeLimit = 4 * 1024 * 1024
 )
 
 // DefaultTimeoutStart to wait for a process to start
@@ -71,9 +57,9 @@ type Executor struct {
 	output *bufio.Reader
 	exited chan bool
 
-	lines        chan LogLine
+	lines        chan logging.LogLine
 	consumeGrp   errgroup.Group
-	remoteLogger RemoteLogger
+	remoteLogger logging.RemoteLogger
 
 	logout *os.File
 	logerr *os.File
@@ -82,7 +68,7 @@ type Executor struct {
 // NewExecutor creates a child subprocess using the provided command line,
 // writing the logs in the given file.
 // You can then start it getting a communication channel
-func NewExecutor(logout *os.File, logerr *os.File, command string, env map[string]string, args ...string) (proc *Executor) {
+func NewExecutor(logout *os.File, logerr *os.File, command string, env map[string]string, args ...string) *Executor {
 	cmd := exec.Command(command, args...)
 	cmd.Stdout = logout
 	cmd.Stderr = logerr
@@ -113,8 +99,13 @@ func NewExecutor(logout *os.File, logerr *os.File, command string, env map[strin
 		logerr: logerr,
 	}
 
-	if env[logDestinationServiceEnv] != "" {
-		if err := e.setupRemoteLogging(env); err != nil {
+	e.remoteLogger, err = logging.RemoteLoggerFromEnv(env)
+	if err != nil {
+		fmt.Fprintf(logerr, "Failed to setup remote logger: %v\n", err)
+		return nil
+	}
+	if e.remoteLogger != nil {
+		if err := e.setupRemoteLogging(); err != nil {
 			fmt.Fprintf(logerr, "Failed to setup remote logging: %v\n", err)
 			return nil
 		}
@@ -123,9 +114,9 @@ func NewExecutor(logout *os.File, logerr *os.File, command string, env map[strin
 	return e
 }
 
-func (proc *Executor) setupRemoteLogging(env map[string]string) error {
+func (proc *Executor) setupRemoteLogging() error {
 	// A chunky buffer in order to not block execution of the function from dealing with log lines.
-	proc.lines = make(chan LogLine, 128)
+	proc.lines = make(chan logging.LogLine, 128)
 
 	proc.cmd.Stdout = nil
 	stdout, err := proc.cmd.StdoutPipe()
@@ -140,60 +131,14 @@ func (proc *Executor) setupRemoteLogging(env map[string]string) error {
 		return fmt.Errorf("failed to get stderr pipe: %w", err)
 	}
 	proc.consumeGrp.Go(func() error { return consumeStream("stderr", stderr, proc.lines) })
-
-	// TODO(SERVERLESS-958): Support multiple destinations at once.
-	switch env[logDestinationServiceEnv] {
-	case "logtail":
-		if env[logtailTokenEnv] == "" {
-			return fmt.Errorf("%q has to be an environment variable of the action", logtailTokenEnv)
-		}
-
-		logger := defaultRemoteLogger()
-		logger.url = "https://in.logtail.com"
-		logger.headers = map[string]string{"Authorization": fmt.Sprintf("Bearer %s", env[logtailTokenEnv])}
-		logger.format = FormatLogtail
-		logger.batchType = batchTypeArray
-		proc.remoteLogger = logger
-	case "papertrail":
-		if env[papertrailTokenEnv] == "" {
-			return fmt.Errorf("%q has to be an environment variable of the action", papertrailTokenEnv)
-		}
-
-		logger := defaultRemoteLogger()
-		logger.url = "https://logs.collector.solarwinds.com/v1/logs"
-		logger.headers = map[string]string{"Authorization": fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(":"+env[papertrailTokenEnv])))}
-		logger.format = FormatLogtail // TODO: Is there a better format for papertrail?
-		logger.batchType = batchTypeNewline
-		proc.remoteLogger = logger
-	case "datadog":
-		if env[datadogSiteEnv] == "" || env[datadogApiKeyEnv] == "" {
-			return fmt.Errorf("%q and %q have to be an environment variable of the action", datadogSiteEnv, datadogApiKeyEnv)
-		}
-
-		logger := defaultRemoteLogger()
-		logger.url = fmt.Sprintf("https://http-intake.logs.%s/api/v2/logs", env[datadogSiteEnv])
-		logger.headers = map[string]string{"DD-API-KEY": env[datadogApiKeyEnv]}
-		logger.format = FormatDatadog
-		logger.batchType = batchTypeArray
-		proc.remoteLogger = logger
-	}
 	return nil
 }
 
-func defaultRemoteLogger() *batchingHttpLogger {
-	return &batchingHttpLogger{
-		http:           http.DefaultClient,
-		batchInterval:  logBatchInterval,
-		batchSizeLimit: logBatchSizeLimit,
-		execAfter:      time.AfterFunc,
-	}
-}
-
 // consumeStream consumes a log stream into the given channel.
-func consumeStream(streamName string, stream io.Reader, ch chan LogLine) error {
+func consumeStream(streamName string, stream io.Reader, ch chan logging.LogLine) error {
 	s := bufio.NewScanner(stream)
 	for s.Scan() {
-		ch <- LogLine{
+		ch <- logging.LogLine{
 			Time:    time.Now(),
 			Message: s.Text(),
 			Stream:  streamName,

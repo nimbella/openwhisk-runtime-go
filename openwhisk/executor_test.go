@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/openwhisk-runtime-go/openwhisk/logging"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -148,14 +149,15 @@ func ExampleNewExecutor_helloack() {
 }
 
 func TestExecutorRemoteLogging(t *testing.T) {
-	lines := make(chan LogLine, 2) // We expect 2 lines being logged.
+	lines := make(chan logging.LogLine, 2) // We expect 2 lines being logged.
 	stdout, stderr := testStdoutStderr(t)
-	proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", map[string]string{logDestinationServiceEnv: "logtail", logtailTokenEnv: "foo"})
-	proc.remoteLogger = testLogger(func(l LogLine) error {
+	proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", nil)
+	proc.remoteLogger = testLogger(func(l logging.LogLine) error {
 		l.Time = time.Time{} // Nullify to support comparison below.
 		lines <- l
 		return nil
 	})
+	assert.NoError(t, proc.setupRemoteLogging())
 	assert.NoError(t, proc.Start(true), "failed to launch process")
 
 	_, err := proc.Interact([]byte(`{"value":{"name":"Markus"}, "activation_id": "testid", "action_name": "testaction"}`))
@@ -163,11 +165,11 @@ func TestExecutorRemoteLogging(t *testing.T) {
 
 	// The streams are technically not guaranteed to arrive in order, so we have to
 	// collect them asynchronous and compare ignoring the order.
-	var got []LogLine
+	var got []logging.LogLine
 	for i := 0; i < 2; i++ {
 		got = append(got, <-lines)
 	}
-	assert.ElementsMatch(t, []LogLine{{
+	assert.ElementsMatch(t, []logging.LogLine{{
 		Stream:       "stdout",
 		Message:      "hello from stdout",
 		ActionName:   "testaction",
@@ -189,10 +191,11 @@ func TestExecutorRemoteLogging(t *testing.T) {
 
 func TestExecutorRemoteLoggingError(t *testing.T) {
 	stdout, stderr := testStdoutStderr(t)
-	proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", map[string]string{logDestinationServiceEnv: "logtail", logtailTokenEnv: "foo"})
-	proc.remoteLogger = testLogger(func(l LogLine) error {
+	proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", nil)
+	proc.remoteLogger = testLogger(func(l logging.LogLine) error {
 		return errors.New("an error")
 	})
+	assert.NoError(t, proc.setupRemoteLogging())
 	assert.NoError(t, proc.Start(true), "failed to launch process")
 
 	_, err := proc.Interact([]byte(`{"value":{"name":"Markus"}}`))
@@ -204,35 +207,9 @@ func TestExecutorRemoteLoggingError(t *testing.T) {
 	assert.Equal(t, []string{"Failed to process logs: 2 errors occurred:", "\t* an error", "\t* an error", logSentinel}, fileToLines(stderr), "local stderr not as expected")
 }
 
-func TestExecutorRemoteLoggingSetupErrors(t *testing.T) {
-	tests := []struct {
-		service       string
-		wantErrorLine string
-	}{{
-		service:       "logtail",
-		wantErrorLine: `Failed to setup remote logging: "LOGTAIL_SOURCE_TOKEN" has to be an environment variable of the action`,
-	}, {
-		service:       "papertrail",
-		wantErrorLine: `Failed to setup remote logging: "PAPERTRAIL_TOKEN" has to be an environment variable of the action`,
-	}, {
-		service:       "datadog",
-		wantErrorLine: `Failed to setup remote logging: "DD_SITE" and "DD_API_KEY" have to be an environment variable of the action`,
-	}}
+type testLogger func(logging.LogLine) error
 
-	for _, test := range tests {
-		t.Run(test.service, func(t *testing.T) {
-			stdout, stderr := testStdoutStderr(t)
-			proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", map[string]string{logDestinationServiceEnv: test.service})
-			assert.Nil(t, proc)
-			assert.Empty(t, fileToLines(stdout), "stdout wasn't empty")
-			assert.Equal(t, []string{test.wantErrorLine}, fileToLines(stderr), "stderr wasn't as expected")
-		})
-	}
-}
-
-type testLogger func(LogLine) error
-
-func (l testLogger) Send(line LogLine) error {
+func (l testLogger) Send(line logging.LogLine) error {
 	return l(line)
 }
 
