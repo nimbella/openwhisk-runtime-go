@@ -101,7 +101,8 @@ type logDestinationDatadog struct {
 }
 
 type logDestinationPapertrail struct {
-	// Endpoint string `json:"endpoint,omitempty"` // AP uses this but we can't due to not having syslog support (yet).
+	// AP uses this but we can't due to not having syslog support (yet).
+	// Endpoint string `json:"endpoint,omitempty"`
 	Token string `json:"token,omitempty"`
 }
 
