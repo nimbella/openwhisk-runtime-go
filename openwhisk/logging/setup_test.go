@@ -8,30 +8,46 @@ import (
 
 func TestRemoteLoggerSetup(t *testing.T) {
 	tests := []struct {
-		name string
-		env  map[string]string
+		name        string
+		env         map[string]string
+		wantLoggers int
 	}{{
 		name: "logtail",
 		env: map[string]string{
 			logDestinationsEnv: `[{"name": "foo", "logtail": {"token": "testtoken"}}]`,
 		},
+		wantLoggers: 1,
 	}, {
 		name: "papertrail",
 		env: map[string]string{
 			logDestinationsEnv: `[{"name": "foo", "papertrail": {"token": "testtoken"}}]`,
 		},
+		wantLoggers: 1,
 	}, {
 		name: "datadog",
 		env: map[string]string{
 			logDestinationsEnv: `[{"name": "foo", "datadog": {"endpoint": "testendpoint", "api_key": "testkey"}}]`,
 		},
+		wantLoggers: 1,
+	}, {
+		name: "two datadogs",
+		env: map[string]string{
+			logDestinationsEnv: `[{"datadog": {"endpoint": "testendpoint", "api_key": "testkey"}}, {"datadog": {"endpoint": "testendpoint", "api_key": "testkey"}}]`,
+		},
+		wantLoggers: 2,
+	}, {
+		name: "one of each",
+		env: map[string]string{
+			logDestinationsEnv: `[{"datadog": {"endpoint": "testendpoint", "api_key": "testkey"}}, {"papertrail": {"token": "testtoken"}}, {"logtail": {"token": "testtoken"}}]`,
+		},
+		wantLoggers: 3,
 	}}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			logger, err := RemoteLoggerFromEnv(test.env)
+			loggers, err := RemoteLoggerFromEnv(test.env)
 			assert.NoError(t, err)
-			assert.NotNil(t, logger)
+			assert.Len(t, loggers, test.wantLoggers)
 		})
 	}
 }

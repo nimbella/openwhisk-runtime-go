@@ -150,13 +150,21 @@ func ExampleNewExecutor_helloack() {
 
 func TestExecutorRemoteLogging(t *testing.T) {
 	lines := make(chan logging.LogLine, 2) // We expect 2 lines being logged.
+	lines2 := make(chan logging.LogLine, 2)
 	stdout, stderr := testStdoutStderr(t)
 	proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", nil)
-	proc.remoteLogger = testLogger(func(l logging.LogLine) error {
-		l.Time = time.Time{} // Nullify to support comparison below.
-		lines <- l
-		return nil
-	})
+	proc.remoteLoggers = []logging.RemoteLogger{
+		testLogger(func(l logging.LogLine) error {
+			l.Time = time.Time{} // Nullify to support comparison below.
+			lines <- l
+			return nil
+		}),
+		testLogger(func(l logging.LogLine) error {
+			l.Time = time.Time{} // Nullify to support comparison below.
+			lines2 <- l
+			return nil
+		}),
+	}
 	assert.NoError(t, proc.setupRemoteLogging())
 	assert.NoError(t, proc.Start(true), "failed to launch process")
 
@@ -165,11 +173,13 @@ func TestExecutorRemoteLogging(t *testing.T) {
 
 	// The streams are technically not guaranteed to arrive in order, so we have to
 	// collect them asynchronous and compare ignoring the order.
-	var got []logging.LogLine
+	var got, got2 []logging.LogLine
 	for i := 0; i < 2; i++ {
 		got = append(got, <-lines)
+		got2 = append(got2, <-lines2)
 	}
-	assert.ElementsMatch(t, []logging.LogLine{{
+
+	want := []logging.LogLine{{
 		Stream:       "stdout",
 		Message:      "hello from stdout",
 		ActionName:   "testaction",
@@ -179,7 +189,11 @@ func TestExecutorRemoteLogging(t *testing.T) {
 		Message:      "hello from stderr",
 		ActionName:   "testaction",
 		ActivationId: "testid",
-	}}, got)
+	}}
+
+	// Both loggers should've gotten the same lines.
+	assert.ElementsMatch(t, want, got)
+	assert.ElementsMatch(t, want, got2)
 
 	proc.Stop()
 
@@ -192,9 +206,11 @@ func TestExecutorRemoteLogging(t *testing.T) {
 func TestExecutorRemoteLoggingError(t *testing.T) {
 	stdout, stderr := testStdoutStderr(t)
 	proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", nil)
-	proc.remoteLogger = testLogger(func(l logging.LogLine) error {
-		return errors.New("an error")
-	})
+	proc.remoteLoggers = []logging.RemoteLogger{
+		testLogger(func(l logging.LogLine) error {
+			return errors.New("an error")
+		}),
+	}
 	assert.NoError(t, proc.setupRemoteLogging())
 	assert.NoError(t, proc.Start(true), "failed to launch process")
 

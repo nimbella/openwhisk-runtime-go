@@ -20,7 +20,7 @@ const (
 	logBatchSizeLimit = 4 * 1024 * 1024
 )
 
-func RemoteLoggerFromEnv(env map[string]string) (RemoteLogger, error) {
+func RemoteLoggerFromEnv(env map[string]string) ([]RemoteLogger, error) {
 	if env[logDestinationsEnv] == "" {
 		return nil, nil
 	}
@@ -34,47 +34,49 @@ func RemoteLoggerFromEnv(env map[string]string) (RemoteLogger, error) {
 		return nil, nil
 	}
 
-	// TODO(SERVERLESS-958): Actually support multiple endpoints.
-	d := logDestinations[0]
-	if d.Logtail != nil {
-		if d.Logtail.Token == "" {
-			return nil, errors.New("logtail.token has to be defined")
+	loggers := make([]RemoteLogger, 0, len(logDestinations))
+	for _, d := range logDestinations {
+		if d.Logtail != nil {
+			if d.Logtail.Token == "" {
+				return nil, errors.New("logtail.token has to be defined")
+			}
+
+			logger := defaultRemoteLogger()
+			logger.url = "https://in.logtail.com"
+			logger.headers = map[string]string{"Authorization": fmt.Sprintf("Bearer %s", d.Logtail.Token)}
+			logger.format = formatLogtail
+			logger.batchType = batchTypeArray
+
+			loggers = append(loggers, logger)
+		} else if d.Papertrail != nil {
+			if d.Papertrail.Token == "" {
+				return nil, errors.New("papertrail.token has to be defined")
+			}
+
+			logger := defaultRemoteLogger()
+			logger.url = "https://logs.collector.solarwinds.com/v1/logs"
+			logger.headers = map[string]string{"Authorization": fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(":"+d.Papertrail.Token)))}
+			logger.format = formatLogtail // TODO: Is there a better format for papertrail?
+			logger.batchType = batchTypeNewline
+
+			loggers = append(loggers, logger)
+		} else if d.Datadog != nil {
+			if d.Datadog.ApiKey == "" || d.Datadog.Endpoint == "" {
+				return nil, errors.New("datadog.endpoint and datadog.api_key have to be defined")
+			}
+
+			logger := defaultRemoteLogger()
+			logger.url = fmt.Sprintf("%s/api/v2/logs", d.Datadog.Endpoint)
+			logger.headers = map[string]string{"DD-API-KEY": d.Datadog.ApiKey}
+			logger.format = formatDatadog
+			logger.batchType = batchTypeArray
+
+			loggers = append(loggers, logger)
+		} else {
+			return nil, fmt.Errorf("invalid log destinations value in %q: either logtail, papertrail or datadog must be set", logDestinationsEnv)
 		}
-
-		logger := defaultRemoteLogger()
-		logger.url = "https://in.logtail.com"
-		logger.headers = map[string]string{"Authorization": fmt.Sprintf("Bearer %s", d.Logtail.Token)}
-		logger.format = formatLogtail
-		logger.batchType = batchTypeArray
-
-		return logger, nil
-	} else if d.Papertrail != nil {
-		if d.Papertrail.Token == "" {
-			return nil, errors.New("papertrail.token has to be defined")
-		}
-
-		logger := defaultRemoteLogger()
-		logger.url = "https://logs.collector.solarwinds.com/v1/logs"
-		logger.headers = map[string]string{"Authorization": fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(":"+d.Papertrail.Token)))}
-		logger.format = formatLogtail // TODO: Is there a better format for papertrail?
-		logger.batchType = batchTypeNewline
-
-		return logger, nil
-	} else if d.Datadog != nil {
-		if d.Datadog.ApiKey == "" || d.Datadog.Endpoint == "" {
-			return nil, errors.New("datadog.endpoint and datadog.api_key have to be defined")
-		}
-
-		logger := defaultRemoteLogger()
-		logger.url = fmt.Sprintf("%s/api/v2/logs", d.Datadog.Endpoint)
-		logger.headers = map[string]string{"DD-API-KEY": d.Datadog.ApiKey}
-		logger.format = formatDatadog
-		logger.batchType = batchTypeArray
-
-		return logger, nil
-	} else {
-		return nil, fmt.Errorf("invalid log destinations value in %q: either logtail, papertrail or datadog must be set", logDestinationsEnv)
 	}
+	return loggers, nil
 }
 
 func defaultRemoteLogger() *batchingHttpLogger {
