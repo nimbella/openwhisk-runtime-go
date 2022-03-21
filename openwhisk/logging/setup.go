@@ -86,8 +86,6 @@ func defaultRemoteLogger() *batchingHttpLogger {
 	}
 }
 
-// logDestination implements the same type hierarchy as AP, see
-// https://docs.digitalocean.com/products/app-platform/references/app-specification-reference/#ref-services-log_destinations
 type logDestination struct {
 	Name       string                    `json:"message,omitempty"`
 	Datadog    *logDestinationDatadog    `json:"datadog,omitempty"`
@@ -101,8 +99,6 @@ type logDestinationDatadog struct {
 }
 
 type logDestinationPapertrail struct {
-	// AP uses this but we can't due to not having syslog support (yet).
-	// Endpoint string `json:"endpoint,omitempty"`
 	Token string `json:"token,omitempty"`
 }
 
