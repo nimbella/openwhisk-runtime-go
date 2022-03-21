@@ -8,29 +8,27 @@ import (
 
 func TestRemoteLoggerSetup(t *testing.T) {
 	tests := []struct {
-		service string
-		env     map[string]string
+		name string
+		env  map[string]string
 	}{{
-		service: "logtail",
+		name: "logtail",
 		env: map[string]string{
-			logtailTokenEnv: "testtoken",
+			logDestinationsEnv: `[{"name": "foo", "logtail": {"token": "testtoken"}}]`,
 		},
 	}, {
-		service: "papertrail",
+		name: "papertrail",
 		env: map[string]string{
-			papertrailTokenEnv: "testtoken",
+			logDestinationsEnv: `[{"name": "foo", "papertrail": {"token": "testtoken"}}]`,
 		},
 	}, {
-		service: "datadog",
+		name: "datadog",
 		env: map[string]string{
-			datadogSiteEnv:   "testsite.com",
-			datadogApiKeyEnv: "testtoken",
+			logDestinationsEnv: `[{"name": "foo", "datadog": {"endpoint": "testendpoint", "api_key": "testkey"}}]`,
 		},
 	}}
 
 	for _, test := range tests {
-		t.Run(test.service, func(t *testing.T) {
-			test.env["LOG_DESTINATION_SERVICE"] = test.service
+		t.Run(test.name, func(t *testing.T) {
 			logger, err := RemoteLoggerFromEnv(test.env)
 			assert.NoError(t, err)
 			assert.NotNil(t, logger)
@@ -42,26 +40,56 @@ func TestRemoteLoggerSetupNoLogger(t *testing.T) {
 	logger, err := RemoteLoggerFromEnv(map[string]string{})
 	assert.NoError(t, err)
 	assert.Nil(t, logger)
+
+	logger, err = RemoteLoggerFromEnv(map[string]string{logDestinationsEnv: ""})
+	assert.NoError(t, err)
+	assert.Nil(t, logger)
+
+	logger, err = RemoteLoggerFromEnv(map[string]string{logDestinationsEnv: "[]"})
+	assert.NoError(t, err)
+	assert.Nil(t, logger)
 }
 
 func TestRemoteLoggerFromEnvSetupErrors(t *testing.T) {
 	tests := []struct {
-		service       string
+		name          string
+		env           map[string]string
 		wantErrorLine string
 	}{{
-		service:       "logtail",
-		wantErrorLine: `"LOGTAIL_SOURCE_TOKEN" has to be an environment variable of the action`,
+		name: "none",
+		env: map[string]string{
+			logDestinationsEnv: `[{}]`,
+		},
+		wantErrorLine: `invalid log destinations value in "LOG_DESTINATIONS": either logtail, papertrail or datadog must be set`,
 	}, {
-		service:       "papertrail",
-		wantErrorLine: `"PAPERTRAIL_TOKEN" has to be an environment variable of the action`,
+		name: "borked",
+		env: map[string]string{
+			logDestinationsEnv: `{}`,
+		},
+		wantErrorLine: `failed to parse "LOG_DESTINATIONS" into valid log destinations: json: cannot unmarshal object into Go value of type []logging.logDestination`,
 	}, {
-		service:       "datadog",
-		wantErrorLine: `"DD_SITE" and "DD_API_KEY" have to be an environment variable of the action`,
+		name: "logtail",
+		env: map[string]string{
+			logDestinationsEnv: `[{"logtail": {}}]`,
+		},
+		wantErrorLine: "logtail.token has to be defined",
+	}, {
+		name: "papertrail",
+		env: map[string]string{
+			logDestinationsEnv: `[{"papertrail": {}}]`,
+		},
+		wantErrorLine: "papertrail.token has to be defined",
+	}, {
+		name: "datadog",
+		env: map[string]string{
+			logDestinationsEnv: `[{"datadog": {}}]`,
+		},
+		wantErrorLine: "datadog.endpoint and datadog.api_key have to be defined",
 	}}
 
 	for _, test := range tests {
-		t.Run(test.service, func(t *testing.T) {
-			logger, err := RemoteLoggerFromEnv(map[string]string{"LOG_DESTINATION_SERVICE": test.service})
+		t.Run(test.name, func(t *testing.T) {
+			logger, err := RemoteLoggerFromEnv(test.env)
 			assert.Nil(t, logger)
 			assert.EqualError(t, err, test.wantErrorLine)
 		})
