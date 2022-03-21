@@ -57,9 +57,9 @@ type Executor struct {
 	output *bufio.Reader
 	exited chan bool
 
-	lines        chan logging.LogLine
-	consumeGrp   errgroup.Group
-	remoteLogger logging.RemoteLogger
+	lines         chan logging.LogLine
+	consumeGrp    errgroup.Group
+	remoteLoggers []logging.RemoteLogger
 
 	logout *os.File
 	logerr *os.File
@@ -99,12 +99,12 @@ func NewExecutor(logout *os.File, logerr *os.File, command string, env map[strin
 		logerr: logerr,
 	}
 
-	e.remoteLogger, err = logging.RemoteLoggerFromEnv(env)
+	e.remoteLoggers, err = logging.RemoteLoggerFromEnv(env)
 	if err != nil {
 		fmt.Fprintf(logerr, "Failed to setup remote logger: %v\n", err)
 		return nil
 	}
-	if e.remoteLogger != nil {
+	if len(e.remoteLoggers) > 0 {
 		if err := e.setupRemoteLogging(); err != nil {
 			fmt.Fprintf(logerr, "Failed to setup remote logging: %v\n", err)
 			return nil
@@ -187,10 +187,16 @@ func (proc *Executor) Interact(in []byte) ([]byte, error) {
 
 			line.ActivationId = metadata.ActivationId
 			line.ActionName = metadata.ActionName
-			if err := proc.remoteLogger.Send(line); err != nil {
-				// We want to continue consuming all of the logs so we don't exit immediately
-				// but surface the error eventually.
-				errors = multierror.Append(errors, err)
+
+			// TODO: We probably want to do this in parallel. Opting for a simple implementation
+			// first to close the loop. We might also want to check how common multiple loggers
+			// are to justify the added complexity.
+			for _, logger := range proc.remoteLoggers {
+				if err := logger.Send(line); err != nil {
+					// We want to continue consuming all of the logs so we don't exit immediately
+					// but surface the error eventually.
+					errors = multierror.Append(errors, err)
+				}
 			}
 		}
 		return errors
@@ -206,8 +212,11 @@ func (proc *Executor) Interact(in []byte) ([]byte, error) {
 	}
 
 	// Flush any potential leftovers.
-	if err := proc.remoteLogger.Flush(); err != nil {
-		fmt.Fprintf(proc.logerr, "Failed to flush logs: %s\n", strings.TrimSpace(err.Error()))
+	// TODO: We probably want to do this in parallel. See above on logger.Send.
+	for _, logger := range proc.remoteLoggers {
+		if err := logger.Flush(); err != nil {
+			fmt.Fprintf(proc.logerr, "Failed to flush logs: %s\n", strings.TrimSpace(err.Error()))
+		}
 	}
 
 	return out, err
