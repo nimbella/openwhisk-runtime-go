@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"reflect"
 	"strconv"
@@ -59,11 +61,17 @@ func main() {
 	defer out.Close()
 	reader := bufio.NewReader(os.Stdin)
 
-	// validate that the function conforms to the supported interfaces
-	if err := validate(Main); err != nil {
-		fmt.Fprintf(os.Stderr, "Function does not conform to supported type: %s\n", err.Error())
-		fmt.Fprintf(out, `{"ok": false}%s`, "\n")
-		os.Exit(1)
+	var function interface{}
+	function = Main
+
+	isHttpHandler := isHttpHandler(function)
+	if !isHttpHandler {
+		// validate that the function conforms to the supported interfaces
+		if err := validate(function); err != nil {
+			fmt.Fprintf(os.Stderr, "Function does not conform to supported type: %s\n", err.Error())
+			fmt.Fprintf(out, `{"ok": false}%s`, "\n")
+			os.Exit(1)
+		}
 	}
 
 	// acknowledgement of started action
@@ -85,7 +93,7 @@ func main() {
 		if debug {
 			log.Printf(">>>'%s'>>>", inbuf)
 		}
-		output, err := execute(Main, inbuf)
+		output, err := execute(function, inbuf, isHttpHandler)
 		if err != nil {
 			output = []byte(fmt.Sprintf(`{"error":%q}`, err.Error()))
 		}
@@ -101,7 +109,7 @@ func main() {
 
 // execute parses the input into a value to pass to f and environment to set
 // for the duration of f and calls f with the respective value and environment.
-func execute(f interface{}, in []byte) ([]byte, error) {
+func execute(f interface{}, in []byte, isHttpHandler bool) ([]byte, error) {
 	var input map[string]json.RawMessage
 	if err := json.Unmarshal(in, &input); err != nil {
 		return nil, fmt.Errorf("failed to parse input: %w", err)
@@ -131,7 +139,15 @@ func execute(f interface{}, in []byte) ([]byte, error) {
 	}
 
 	// Process the value through the actual function
-	output, err := invoke(ctx, f, input["value"])
+	var (
+		output []byte
+		err    error
+	)
+	if !isHttpHandler {
+		output, err = invoke(ctx, f, input["value"])
+	} else {
+		output, err = invokeHttpHandler(ctx, f, input["value"])
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -277,4 +293,100 @@ func valueToError(val reflect.Value) error {
 		return err
 	}
 	return nil
+}
+
+var httpResponseWriterInterface = reflect.TypeOf((*http.ResponseWriter)(nil)).Elem()
+
+// isHttpHandler returns whether or not the given function looks like a Golang http handler.
+func isHttpHandler(f interface{}) bool {
+	fun := reflect.ValueOf(f)
+	typ := fun.Type()
+
+	if typ.NumIn() == 0 {
+		return false
+	}
+
+	return typ.In(0).Implements(httpResponseWriterInterface)
+}
+
+// owHttpRequest represents the metadata an HTTP request has when it comes via the
+// web invocation path.
+type owHttpRequest struct {
+	Method  string            `json:"__ow_method,omitempty"`
+	Headers map[string]string `json:"__ow_headers,omitempty"`
+	Path    string            `json:"__ow_path,omitempty"`
+	User    string            `json:"__ow_user,omitempty"`
+	Body    string            `json:"__ow_body,omitempty"`
+	Query   string            `json:"__ow_query,omitempty"` // Not available for now.
+}
+
+// owHttpResponse is a response as OW expects it from an action.
+type owHttpResponse struct {
+	Headers    map[string]string `json:"headers,omitempty"`
+	StatusCode int               `json:"statusCode,omitempty"`
+	Body       interface{}       `json:"body,omitempty"`
+}
+
+// responseRecorder is an implementation of http.ResponseWriter, which stores all writes
+// in memory so it can be transformed into a response as OW understands it.
+type responseRecorder struct {
+	body    bytes.Buffer
+	status  int
+	headers http.Header
+}
+
+func (r *responseRecorder) Header() http.Header {
+	if r.headers == nil {
+		r.headers = make(map[string][]string, 1)
+	}
+	return r.headers
+}
+
+func (r *responseRecorder) WriteHeader(statusCode int) {
+	r.status = statusCode
+}
+
+func (r *responseRecorder) Write(b []byte) (int, error) {
+	return r.body.Write(b)
+}
+
+func invokeHttpHandler(ctx context.Context, f interface{}, in []byte) ([]byte, error) {
+	fun := reflect.ValueOf(f)
+
+	// Parse the request.
+	var r owHttpRequest
+	if err := json.Unmarshal(in, &r); err != nil {
+		return nil, fmt.Errorf("failed to parse request: %w", err)
+	}
+	// Transform it to *http.Request
+	url, err := url.Parse("http://")
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse URL: %w", err)
+	}
+	url.Path = r.Path
+	url.RawQuery = r.Query
+	req, err := http.NewRequestWithContext(ctx, r.Method, url.String(), strings.NewReader(r.Body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate request: %w", err)
+	}
+
+	for k, v := range r.Headers {
+		req.Header.Add(k, v)
+	}
+
+	recorder := &responseRecorder{}
+	fun.Call([]reflect.Value{reflect.ValueOf(recorder), reflect.ValueOf(req)})
+
+	headers := make(map[string]string, len(recorder.headers))
+	for k := range recorder.headers {
+		headers[k] = recorder.headers.Get(k)
+	}
+
+	// Transform recorder (ResponseWriter) into a response OW can understand.
+	response := owHttpResponse{
+		Body:       recorder.body.String(),
+		StatusCode: recorder.status,
+		Headers:    headers,
+	}
+	return json.Marshal(response)
 }

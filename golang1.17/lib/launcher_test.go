@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -49,7 +52,7 @@ func TestExecuteParsesEnvAndArgs(t *testing.T) {
 	in := []byte(`{"foo":"baz","value":{"testkey":"testvalue"},"key1":"val1","invalid":1}`)
 	want := []byte(`{"arg":{"testkey":"testvalue"},"env":{"__OW_FOO":"baz","__OW_KEY1":"val1"}}`)
 
-	out, err := execute(f, in)
+	out, err := execute(f, in, false)
 	assert.NoError(t, err)
 	assert.Equal(t, string(want), string(out))
 }
@@ -69,7 +72,7 @@ func TestExecuteParsesDeadline(t *testing.T) {
 	// Rebuilding the time from milliseconds is important for the comparison.
 	want := []byte(fmt.Sprintf(`{"deadline":%q}`, time.UnixMilli(deadline).String()))
 
-	out, err := execute(f, in)
+	out, err := execute(f, in, false)
 	assert.NoError(t, err)
 	assert.Equal(t, string(want), string(out))
 }
@@ -92,7 +95,7 @@ func TestExecuteDefaultsToNoDeadline(t *testing.T) {
 	// We expect an empty object since the deadline should be unset.
 	want := []byte("{}")
 
-	out, err := execute(f, in)
+	out, err := execute(f, in, false)
 	assert.NoError(t, err)
 	assert.Equal(t, string(want), string(out))
 }
@@ -271,6 +274,79 @@ func TestValidate(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestIsHttpHandler(t *testing.T) {
+	tests := []struct {
+		name string
+		f    interface{}
+		want bool
+	}{{
+		name: "handler",
+		f:    func(rw http.ResponseWriter, req *http.Request) {},
+		want: true,
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			is := isHttpHandler(tt.f)
+			assert.Equal(t, tt.want, is)
+		})
+	}
+}
+
+func TestInvokeHttpHandler(t *testing.T) {
+	request := owHttpRequest{
+		Method: "get",
+		Headers: map[string]string{
+			"Testheader": "Testvalue",
+		},
+		Path:  "/this/is/a/testpath",
+		Query: "query=test&query2=test2",
+		Body:  "testbody",
+	}
+	requestJson, err := json.Marshal(request)
+	assert.NoError(t, err)
+
+	tests := []struct {
+		name string
+		f    interface{}
+		want []byte
+	}{{
+		name: "empty handler",
+		f:    func(rw http.ResponseWriter, req *http.Request) {},
+		want: []byte(`{"body":""}`),
+	}, {
+		name: "handler with all functionality",
+		f: func(rw http.ResponseWriter, req *http.Request) {
+			rw.Header().Add("foo", "bar")
+			rw.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(rw, "Hello world!")
+		},
+		want: []byte(`{"headers":{"Foo":"bar"},"statusCode":404,"body":"Hello world!"}`),
+	}, {
+		name: "checking the request",
+		f: func(rw http.ResponseWriter, req *http.Request) {
+			body, err := ioutil.ReadAll(req.Body)
+			assert.NoError(t, err)
+
+			for k := range req.Header {
+				rw.Header().Add(k, req.Header.Get(k))
+			}
+			rw.Write(body)
+			rw.Write([]byte(" "))
+			rw.Write([]byte(req.URL.String()))
+		},
+		want: []byte(`{"headers":{"Testheader":"Testvalue"},"body":"testbody http:///this/is/a/testpath?query=test\u0026query2=test2"}`),
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := invokeHttpHandler(context.Background(), tt.f, requestJson)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
