@@ -83,36 +83,11 @@ func main() {
 		if debug {
 			log.Printf(">>>'%s'>>>", inbuf)
 		}
-		// parse one line
-		var input map[string]json.RawMessage
-		err = json.Unmarshal(inbuf, &input)
+		output, err := execute(Main, inbuf)
 		if err != nil {
-			log.Println(err.Error())
-			fmt.Fprintf(out, "{ error: %q}\n", err.Error())
+			fmt.Fprintf(out, `{"error":%q}`, err.Error())
 			continue
 		}
-		if debug {
-			log.Printf("%v\n", input)
-		}
-		// set environment variables
-		for k, v := range input {
-			if k == "value" {
-				continue
-			}
-			var s string
-			if err := json.Unmarshal(v, &s); err != nil {
-				os.Setenv("__OW_"+strings.ToUpper(k), s)
-			}
-		}
-
-		// process the request
-		output, err := invoke(Main, input["value"])
-		if err != nil {
-			log.Println(err.Error())
-			fmt.Fprintf(out, "{ error: %q}\n", err.Error())
-			continue
-		}
-		output = bytes.Replace(output, []byte("\n"), []byte(""), -1)
 		if debug {
 			log.Printf("<<<'%s'<<<", output)
 		}
@@ -121,6 +96,36 @@ func main() {
 		fmt.Fprintln(os.Stdout, "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX")
 		fmt.Fprintln(os.Stderr, "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX")
 	}
+}
+
+// execute parses the input into a value to pass to f and environment to set
+// for the duration of f and calls f with the respective value and environment.
+func execute(f interface{}, in []byte) ([]byte, error) {
+	var input map[string]json.RawMessage
+	if err := json.Unmarshal(in, &input); err != nil {
+		return nil, fmt.Errorf("failed to parse input: %w", err)
+	}
+
+	// All values except "value" are expected to become environment variables.
+	for k, v := range input {
+		if k == "value" {
+			continue
+		}
+		var s string
+		if err := json.Unmarshal(v, &s); err == nil {
+			os.Setenv("__OW_"+strings.ToUpper(k), s)
+		}
+	}
+
+	// Process the value through the actual function
+	output, err := invoke(f, input["value"])
+	if err != nil {
+		return nil, err
+	}
+
+	// Sanitize output.
+	output = bytes.ReplaceAll(output, []byte("\n"), []byte(""))
+	return output, nil
 }
 
 var (
