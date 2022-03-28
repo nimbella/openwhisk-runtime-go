@@ -19,7 +19,19 @@ type TestTypeOut struct {
 	Bar string `json:"bar,omitempy"`
 }
 
+// cleanEnv removes all environment keys that are set by execute potentially.
+func cleanEnv() {
+	for _, e := range os.Environ() {
+		parts := strings.SplitN(e, "=", 2)
+		if strings.HasPrefix(parts[0], "__OW_") {
+			os.Unsetenv(parts[0])
+		}
+	}
+}
+
 func TestExecuteParsesEnvAndArgs(t *testing.T) {
+	defer cleanEnv()
+
 	f := func(arg map[string]interface{}) map[string]interface{} {
 		env := make(map[string]string)
 		for _, e := range os.Environ() {
@@ -34,8 +46,8 @@ func TestExecuteParsesEnvAndArgs(t *testing.T) {
 			"arg": arg,
 		}
 	}
-	in := []byte(`{"foo":"baz","value":{"testkey":"testvalue"},"key1":"val1","invalid":1,"deadline":"1337"}`)
-	want := []byte(`{"arg":{"testkey":"testvalue"},"env":{"__OW_DEADLINE":"1337","__OW_FOO":"baz","__OW_KEY1":"val1"}}`)
+	in := []byte(`{"foo":"baz","value":{"testkey":"testvalue"},"key1":"val1","invalid":1}`)
+	want := []byte(`{"arg":{"testkey":"testvalue"},"env":{"__OW_FOO":"baz","__OW_KEY1":"val1"}}`)
 
 	out, err := execute(f, in)
 	assert.NoError(t, err)
@@ -43,6 +55,8 @@ func TestExecuteParsesEnvAndArgs(t *testing.T) {
 }
 
 func TestExecuteParsesDeadline(t *testing.T) {
+	defer cleanEnv()
+
 	f := func(ctx context.Context) map[string]string {
 		deadline, _ := ctx.Deadline()
 		return map[string]string{
@@ -54,6 +68,29 @@ func TestExecuteParsesDeadline(t *testing.T) {
 	in := []byte(fmt.Sprintf(`{"deadline":"%d","value":{"testkey":"testvalue"}}`, deadline))
 	// Rebuilding the time from milliseconds is important for the comparison.
 	want := []byte(fmt.Sprintf(`{"deadline":%q}`, time.UnixMilli(deadline).String()))
+
+	out, err := execute(f, in)
+	assert.NoError(t, err)
+	assert.Equal(t, string(want), string(out))
+}
+
+func TestExecuteDefaultsToNoDeadline(t *testing.T) {
+	defer cleanEnv()
+
+	type ret struct {
+		Deadline *time.Time `json:"deadline,omitempty"`
+	}
+	f := func(ctx context.Context) ret {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			return ret{}
+		}
+		return ret{Deadline: &deadline}
+	}
+
+	in := []byte(`{"value":{"testkey":"testvalue"}}`)
+	// We expect an empty object since the deadline should be unset.
+	want := []byte("{}")
 
 	out, err := execute(f, in)
 	assert.NoError(t, err)

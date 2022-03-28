@@ -119,13 +119,17 @@ func execute(f interface{}, in []byte) ([]byte, error) {
 		}
 	}
 
-	// Setup a context that cancels at the given deadline.
-	deadlineMillis, err := strconv.ParseInt(os.Getenv("__OW_DEADLINE"), 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse deadline: %w", err)
+	ctx := context.Background()
+	if deadline := os.Getenv("__OW_DEADLINE"); deadline != "" {
+		// Setup a context that cancels at the given deadline.
+		deadlineMillis, err := strconv.ParseInt(os.Getenv("__OW_DEADLINE"), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse deadline: %w", err)
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(context.Background(), time.UnixMilli(deadlineMillis))
+		defer cancel()
 	}
-	ctx, cancel := context.WithDeadline(context.Background(), time.UnixMilli(deadlineMillis))
-	defer cancel()
 
 	// Process the value through the actual function
 	output, err := invoke(ctx, f, input["value"])
