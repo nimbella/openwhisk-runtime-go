@@ -27,7 +27,9 @@ import (
 	"log"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // OwExecutionEnv is the execution environment set at compile time
@@ -117,8 +119,16 @@ func execute(f interface{}, in []byte) ([]byte, error) {
 		}
 	}
 
+	// Setup a context that cancels at the given deadline.
+	deadlineMillis, err := strconv.ParseInt(os.Getenv("__OW_DEADLINE"), 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse deadline: %w", err)
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), time.UnixMilli(deadlineMillis))
+	defer cancel()
+
 	// Process the value through the actual function
-	output, err := invoke(f, input["value"])
+	output, err := invoke(ctx, f, input["value"])
 	if err != nil {
 		return nil, err
 	}
@@ -159,10 +169,10 @@ func validate(f interface{}) error {
 //
 // All permutations of the signatures defined in buildArguments and handleReturnValues
 // are supported.
-func invoke(f interface{}, in []byte) ([]byte, error) {
+func invoke(ctx context.Context, f interface{}, in []byte) ([]byte, error) {
 	fun := reflect.ValueOf(f)
 
-	arguments, err := buildArguments(fun, in)
+	arguments, err := buildArguments(ctx, fun, in)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +186,7 @@ func invoke(f interface{}, in []byte) ([]byte, error) {
 // - (context.Context)
 // - (Tin)
 // - (context.Context, Tin)
-func buildArguments(f reflect.Value, in []byte) ([]reflect.Value, error) {
+func buildArguments(ctx context.Context, f reflect.Value, in []byte) ([]reflect.Value, error) {
 	typ := f.Type()
 	numArgs := typ.NumIn()
 
@@ -191,14 +201,12 @@ func buildArguments(f reflect.Value, in []byte) ([]reflect.Value, error) {
 		if err := json.Unmarshal(in, val); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal input value: %w", err)
 		}
-		// TODO: Do something useful with the context.
-		return []reflect.Value{reflect.ValueOf(context.Background()), reflect.ValueOf(val).Elem()}, nil
+		return []reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(val).Elem()}, nil
 	}
 
 	// If there's only 1 argument, we need to figure out if it's only a context or only a value.
 	if typ.In(0).Implements(contextInterface) {
-		// TODO: Do something useful with the context.
-		return []reflect.Value{reflect.ValueOf(context.Background())}, nil
+		return []reflect.Value{reflect.ValueOf(ctx)}, nil
 	}
 
 	val := reflect.New(typ.In(0)).Interface()

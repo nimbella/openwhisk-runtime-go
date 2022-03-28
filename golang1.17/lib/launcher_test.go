@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -33,8 +34,26 @@ func TestExecuteParsesEnvAndArgs(t *testing.T) {
 			"arg": arg,
 		}
 	}
-	in := []byte(`{"foo":"baz","value":{"testkey":"testvalue"},"key1":"val1","invalid":1}`)
-	want := []byte(`{"arg":{"testkey":"testvalue"},"env":{"__OW_FOO":"baz","__OW_KEY1":"val1"}}`)
+	in := []byte(`{"foo":"baz","value":{"testkey":"testvalue"},"key1":"val1","invalid":1,"deadline":"1337"}`)
+	want := []byte(`{"arg":{"testkey":"testvalue"},"env":{"__OW_DEADLINE":"1337","__OW_FOO":"baz","__OW_KEY1":"val1"}}`)
+
+	out, err := execute(f, in)
+	assert.NoError(t, err)
+	assert.Equal(t, string(want), string(out))
+}
+
+func TestExecuteParsesDeadline(t *testing.T) {
+	f := func(ctx context.Context) map[string]string {
+		deadline, _ := ctx.Deadline()
+		return map[string]string{
+			"deadline": deadline.String(),
+		}
+	}
+
+	deadline := time.Now().Add(10 * time.Second).UnixMilli()
+	in := []byte(fmt.Sprintf(`{"deadline":"%d","value":{"testkey":"testvalue"}}`, deadline))
+	// Rebuilding the time from milliseconds is important for the comparison.
+	want := []byte(fmt.Sprintf(`{"deadline":%q}`, time.UnixMilli(deadline).String()))
 
 	out, err := execute(f, in)
 	assert.NoError(t, err)
@@ -135,7 +154,7 @@ func TestInvoke(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out, err := invoke(tt.f, inBytes)
+			out, err := invoke(context.Background(), tt.f, inBytes)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, out)
 		})
