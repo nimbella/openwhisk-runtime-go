@@ -100,7 +100,7 @@ func main() {
 				continue
 			}
 			var s string
-			if err := json.Unmarshal(v, &s); err != nil {
+			if err := json.Unmarshal(v, &s); err == nil {
 				os.Setenv("__OW_"+strings.ToUpper(k), s)
 			}
 		}
