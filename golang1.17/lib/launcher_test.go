@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,6 +16,29 @@ type TestTypeIn struct {
 
 type TestTypeOut struct {
 	Bar string `json:"bar,omitempy"`
+}
+
+func TestExecuteParsesEnvAndArgs(t *testing.T) {
+	f := func(arg map[string]interface{}) map[string]interface{} {
+		env := make(map[string]string)
+		for _, e := range os.Environ() {
+			parts := strings.SplitN(e, "=", 2)
+			if strings.HasPrefix(parts[0], "__OW_") {
+				env[parts[0]] = parts[1]
+			}
+		}
+
+		return map[string]interface{}{
+			"env": env,
+			"arg": arg,
+		}
+	}
+	in := []byte(`{"foo":"baz","value":{"testkey":"testvalue"},"key1":"val1","invalid":1}`)
+	want := []byte(`{"arg":{"testkey":"testvalue"},"env":{"__OW_FOO":"baz","__OW_KEY1":"val1"}}`)
+
+	out, err := execute(f, in)
+	assert.NoError(t, err)
+	assert.Equal(t, string(want), string(out))
 }
 
 func TestInvoke(t *testing.T) {
