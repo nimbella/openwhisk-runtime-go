@@ -20,11 +20,13 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"reflect"
 	"strings"
 )
 
@@ -50,15 +52,17 @@ func main() {
 		log.Printf("Environment: %v", os.Environ())
 	}
 
-	// assign the main function
-	type Action func(event map[string]interface{}) map[string]interface{}
-	var action Action
-	action = Main
-
 	// input
 	out := os.NewFile(3, "pipe")
 	defer out.Close()
 	reader := bufio.NewReader(os.Stdin)
+
+	// validate that the function conforms to the supported interfaces
+	if err := validate(Main); err != nil {
+		fmt.Fprintf(os.Stderr, "Function does not conform to supported type: %s\n", err.Error())
+		fmt.Fprintf(out, `{"ok": false}%s`, "\n")
+		os.Exit(1)
+	}
 
 	// acknowledgement of started action
 	fmt.Fprintf(out, `{ "ok": true}%s`, "\n")
@@ -80,7 +84,7 @@ func main() {
 			log.Printf(">>>'%s'>>>", inbuf)
 		}
 		// parse one line
-		var input map[string]interface{}
+		var input map[string]json.RawMessage
 		err = json.Unmarshal(inbuf, &input)
 		if err != nil {
 			log.Println(err.Error())
@@ -95,19 +99,14 @@ func main() {
 			if k == "value" {
 				continue
 			}
-			if s, ok := v.(string); ok {
+			var s string
+			if err := json.Unmarshal(v, &s); err != nil {
 				os.Setenv("__OW_"+strings.ToUpper(k), s)
 			}
 		}
-		// get payload if not empty
-		var payload map[string]interface{}
-		if value, ok := input["value"].(map[string]interface{}); ok {
-			payload = value
-		}
+
 		// process the request
-		result := action(payload)
-		// encode the answer
-		output, err := json.Marshal(&result)
+		output, err := invoke(Main, input["value"])
 		if err != nil {
 			log.Println(err.Error())
 			fmt.Fprintf(out, "{ error: %q}\n", err.Error())
@@ -122,4 +121,136 @@ func main() {
 		fmt.Fprintln(os.Stdout, "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX")
 		fmt.Fprintln(os.Stderr, "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX")
 	}
+}
+
+var (
+	errorInterface   = reflect.TypeOf((*error)(nil)).Elem()
+	contextInterface = reflect.TypeOf((*context.Context)(nil)).Elem()
+)
+
+// validate validates a given generic function f for supported
+func validate(f interface{}) error {
+	fun := reflect.ValueOf(f)
+	typ := fun.Type()
+
+	if numIn := typ.NumIn(); numIn > 2 {
+		return fmt.Errorf("at most 2 arguments are supported for the function, got %d", numIn)
+	} else if numIn == 2 && !typ.In(0).Implements(contextInterface) {
+		return fmt.Errorf("when passing 2 arguments, the first must be of type context.Context, got %s", typ.In(0).Name())
+	}
+
+	if numOut := typ.NumOut(); numOut > 2 {
+		return fmt.Errorf("at most 2 return values are supported for the function, got %d", numOut)
+	} else if numOut == 2 && !typ.Out(numOut-1).Implements(errorInterface) {
+		return fmt.Errorf("when expecting 2 return values, the last must be of type error, got %s", typ.Out(numOut-1).Name())
+	}
+
+	return nil
+}
+
+// invoke calls a generic function f with the given JSON in bytes, which is assumed
+// to be unmarshalable into a value argument of f, if present. If the function has a
+// return value other than error, it's expected to be marshalable to JSON.
+//
+// All permutations of the signatures defined in buildArguments and handleReturnValues
+// are supported.
+func invoke(f interface{}, in []byte) ([]byte, error) {
+	fun := reflect.ValueOf(f)
+
+	arguments, err := buildArguments(fun, in)
+	if err != nil {
+		return nil, err
+	}
+	return handleReturnValues(fun.Call(arguments))
+}
+
+// buildArguments builds the arguments to call f.
+//
+// These argument signatures are supported:
+// - ()
+// - (context.Context)
+// - (Tin)
+// - (context.Context, Tin)
+func buildArguments(f reflect.Value, in []byte) ([]reflect.Value, error) {
+	typ := f.Type()
+	numArgs := typ.NumIn()
+
+	if numArgs == 0 {
+		// No arguments, exit early.
+		return nil, nil
+	}
+
+	if numArgs == 2 {
+		// We know that the first argument must be the context and the second the value here.
+		val := reflect.New(typ.In(1)).Interface()
+		if err := json.Unmarshal(in, val); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal input value: %w", err)
+		}
+		// TODO: Do something useful with the context.
+		return []reflect.Value{reflect.ValueOf(context.Background()), reflect.ValueOf(val).Elem()}, nil
+	}
+
+	// If there's only 1 argument, we need to figure out if it's only a context or only a value.
+	if typ.In(0).Implements(contextInterface) {
+		// TODO: Do something useful with the context.
+		return []reflect.Value{reflect.ValueOf(context.Background())}, nil
+	}
+
+	val := reflect.New(typ.In(0)).Interface()
+	if err := json.Unmarshal(in, val); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal input value: %w", err)
+	}
+	return []reflect.Value{reflect.ValueOf(val).Elem()}, nil
+}
+
+// handleReturnValues handles the values returned from a reflected function's call.
+//
+// These return value signatures are supported:
+// - <none>
+// - error
+// - Tout
+// - (Tout, error)
+func handleReturnValues(returns []reflect.Value) ([]byte, error) {
+	if len(returns) == 0 {
+		// If there's no return values, return a compatible empty JSON object.
+		return []byte("{}"), nil
+	}
+
+	if len(returns) == 2 {
+		if err := valueToError(returns[1]); err != nil {
+			// Transform the function error into an actual error return from the function.
+			// Return early as an error should always take precedence.
+			return []byte(fmt.Sprintf(`{"error": %q}`, err.Error())), nil
+		}
+
+		ret, err := json.Marshal(returns[0].Interface())
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal output value: %w", err)
+		}
+		return ret, nil
+	}
+
+	// If there's only 1 return value, we need to figure out if it's only an error or only a value.
+	if returns[0].Type().Implements(errorInterface) {
+		if err := valueToError(returns[0]); err != nil {
+			// Transform the function error into an actual error return from the function.
+			// Return early as an error should always take precedence.
+			return []byte(fmt.Sprintf(`{"error": %q}`, err.Error())), nil
+		}
+		return []byte("{}"), nil
+	}
+
+	ret, err := json.Marshal(returns[0].Interface())
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal output value: %w", err)
+	}
+	return ret, nil
+}
+
+// valueToError builds an error from the given reflect.Value, if there is one.
+func valueToError(val reflect.Value) error {
+	if err, ok := val.Interface().(error); ok && err != nil {
+		return err
+	}
+	return nil
 }
