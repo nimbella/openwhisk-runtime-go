@@ -12,7 +12,6 @@ type LogLine struct {
 	Message      string
 	Time         time.Time
 	Stream       string
-	ActionName   string
 	ActivationId string
 }
 

@@ -46,7 +46,6 @@ var DefaultTimeoutStart = 5 * time.Millisecond
 
 type activationMetadata struct {
 	ActivationId string `json:"activation_id"`
-	ActionName   string `json:"action_name"`
 }
 
 // Executor is the container and the guardian  of a child process
@@ -186,7 +185,6 @@ func (proc *Executor) Interact(in []byte) ([]byte, error) {
 			}
 
 			line.ActivationId = metadata.ActivationId
-			line.ActionName = metadata.ActionName
 
 			// TODO: We probably want to do this in parallel. Opting for a simple implementation
 			// first to close the loop. We might also want to check how common multiple loggers

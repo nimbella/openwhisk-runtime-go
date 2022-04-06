@@ -182,12 +182,10 @@ func TestExecutorRemoteLogging(t *testing.T) {
 	want := []logging.LogLine{{
 		Stream:       "stdout",
 		Message:      "hello from stdout",
-		ActionName:   "testaction",
 		ActivationId: "testid",
 	}, {
 		Stream:       "stderr",
 		Message:      "hello from stderr",
-		ActionName:   "testaction",
 		ActivationId: "testid",
 	}}
 

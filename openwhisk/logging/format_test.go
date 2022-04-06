@@ -9,11 +9,10 @@ import (
 )
 
 func TestFormatDatadogJSON(t *testing.T) {
-	by, err := formatDatadog(LogLine{
+	by, err := formatDatadog(logDestinationAttributes{"testapp", "testfunct"})(LogLine{
 		Message:      `{"message": "foo", "attribute": "bar"}`,
 		Time:         time.Unix(0, 0),
 		Stream:       "stdout",
-		ActionName:   "testaction",
 		ActivationId: "testid",
 	})
 	assert.NoError(t, err, "failed to format log line")
@@ -25,20 +24,19 @@ func TestFormatDatadogJSON(t *testing.T) {
 		"message":   "foo", // This and 'attribute' are flattened into the structure.
 		"attribute": "bar",
 		"date":      float64(0), // Generic parsing transforms numbers into float64.
-		"ddtags":    "host:testaction,activationid:testid",
-		"ddsource":  "testaction",
-		"service":   "testaction",
+		"ddtags":    "host:testapp,activationid:testid",
+		"ddsource":  "testapp",
+		"service":   "testfunct",
 	}
 
 	assert.Equal(t, want, got)
 }
 
 func TestFormatDatadogJSONFallback(t *testing.T) {
-	by, err := formatDatadog(LogLine{
+	by, err := formatDatadog(logDestinationAttributes{"testapp", "testfunct"})(LogLine{
 		Message:      `{ha... i'm not actually JSON :)`,
 		Time:         time.Unix(0, 0),
 		Stream:       "stdout",
-		ActionName:   "testaction",
 		ActivationId: "testid",
 	})
 	assert.NoError(t, err, "failed to format log line")
@@ -48,9 +46,9 @@ func TestFormatDatadogJSONFallback(t *testing.T) {
 
 	want := map[string]interface{}{
 		"message":  "{ha... i'm not actually JSON :)", // This and 'attribute' are flattened into the structure.
-		"ddtags":   "host:testaction,activationid:testid",
-		"ddsource": "testaction",
-		"service":  "testaction",
+		"ddtags":   "host:testapp,activationid:testid",
+		"ddsource": "testapp",
+		"service":  "testfunct",
 	}
 
 	assert.Equal(t, want, got)
