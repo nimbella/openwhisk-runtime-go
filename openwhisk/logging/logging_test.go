@@ -12,9 +12,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var testMetadata = logDestinationAttributes{
+	AppName:       "testapp",
+	ComponentName: "testfunc",
+}
+
 func TestHttpLoggerSend(t *testing.T) {
 	req := make(chan *http.Request, 1)
-	format := formatLogtail
+	format := formatLogtail(testMetadata)
 	logger := &httpLogger{
 		http: &http.Client{Transport: testTransport(func(r *http.Request) (*http.Response, error) {
 			req <- r
@@ -27,7 +32,6 @@ func TestHttpLoggerSend(t *testing.T) {
 		Message:      "Hello World",
 		Time:         time.Time{},
 		Stream:       "stdout",
-		ActionName:   "sample/test",
 		ActivationId: "abcdef",
 	}
 	assert.NoError(t, logger.Send(line), "failed to send log")
@@ -46,7 +50,7 @@ func TestHttpLoggerSendError(t *testing.T) {
 		http: &http.Client{Transport: testTransport(func(r *http.Request) (*http.Response, error) {
 			return nil, errors.New("an error")
 		})},
-		format: formatLogtail,
+		format: formatLogtail(testMetadata),
 	}
 
 	assert.Error(t, logger.Send(LogLine{}))
@@ -59,7 +63,7 @@ func TestHttpLoggerSendHttpError(t *testing.T) {
 			rec.WriteHeader(http.StatusUnauthorized)
 			return rec.Result(), nil
 		})},
-		format: formatLogtail,
+		format: formatLogtail(testMetadata),
 	}
 
 	assert.Error(t, logger.Send(LogLine{}))
@@ -68,7 +72,7 @@ func TestHttpLoggerSendHttpError(t *testing.T) {
 func TestBatchingHttpLoggerSend(t *testing.T) {
 	bodies := make(chan string, 1)
 	scheduledFlushs := make(chan func(), 1)
-	format := formatLogtail
+	format := formatLogtail(testMetadata)
 	logger := &batchingHttpLogger{
 		http: &http.Client{Transport: testTransport(func(r *http.Request) (*http.Response, error) {
 			body, err := ioutil.ReadAll(r.Body)
@@ -85,7 +89,6 @@ func TestBatchingHttpLoggerSend(t *testing.T) {
 		Message:      "Hello World",
 		Time:         time.Time{},
 		Stream:       "stdout",
-		ActionName:   "sample/test",
 		ActivationId: "abcdef",
 	}
 	assert.NoError(t, logger.Send(line), "failed to send first log")
@@ -111,7 +114,7 @@ func TestBatchingHttpLoggerSend(t *testing.T) {
 
 func TestBatchingHttpLoggerArraySend(t *testing.T) {
 	bodies := make(chan string, 1)
-	format := formatLogtail
+	format := formatLogtail(testMetadata)
 	logger := &batchingHttpLogger{
 		http: &http.Client{Transport: testTransport(func(r *http.Request) (*http.Response, error) {
 			body, err := ioutil.ReadAll(r.Body)
@@ -128,7 +131,6 @@ func TestBatchingHttpLoggerArraySend(t *testing.T) {
 		Message:      "Hello World",
 		Time:         time.Time{},
 		Stream:       "stdout",
-		ActionName:   "sample/test",
 		ActivationId: "abcdef",
 	}
 	assert.NoError(t, logger.Send(line), "failed to send first log")
@@ -151,7 +153,7 @@ func TestBatchingHttpLoggerArraySend(t *testing.T) {
 
 func TestBatchingHttpLoggerSendExceedLimit(t *testing.T) {
 	bodies := make(chan string, 2)
-	format := formatLogtail
+	format := formatLogtail(testMetadata)
 	logger := &batchingHttpLogger{
 		http: &http.Client{Transport: testTransport(func(r *http.Request) (*http.Response, error) {
 			body, err := ioutil.ReadAll(r.Body)
@@ -169,7 +171,6 @@ func TestBatchingHttpLoggerSendExceedLimit(t *testing.T) {
 		Message:      "Hello World",
 		Time:         time.Time{},
 		Stream:       "stdout",
-		ActionName:   "sample/test",
 		ActivationId: "abcdef",
 	}
 	assert.NoError(t, logger.Send(line), "failed to send first log")
