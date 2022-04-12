@@ -41,7 +41,10 @@ def copy_replace(src, dst, match=None, replacement=""):
 
 
 def sources(launcher, source_dir, main):
-    func = main.capitalize()
+    func = main
+    if func == "main":
+        # main is defaulted to "main" in the go-proxy. We want to fix that here.
+        func = "Main"
     has_main = None
 
     # copy the exec to exec.go
