@@ -125,7 +125,7 @@ abstract class ActionLoopBasicGoTests
        | return args
        |}
     """.stripMargin,
-    main = "niam"
+    main = "Niam"
   )
 
   override val testLargeInput = TestConfig(
