@@ -38,7 +38,7 @@ abstract class ActionLoopGoContainerTests
   behavior of image
 
   def helloGo(main: String, pkg: String = "main") = {
-    val func = main.capitalize
+    val func = if(main == "main") "Main" else main
     s"""|package ${pkg}
         |
         |import "fmt"
