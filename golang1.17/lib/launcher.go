@@ -87,8 +87,7 @@ func main() {
 		}
 		output, err := execute(Main, inbuf)
 		if err != nil {
-			fmt.Fprintf(out, `{"error":%q}`, err.Error())
-			continue
+			output = []byte(fmt.Sprintf(`{"error":%q}`, err.Error()))
 		}
 		if debug {
 			log.Printf("<<<'%s'<<<", output)
