@@ -21,6 +21,7 @@
 
 # This performs the default build action of this runtime when executed in an action build directory
 set -e
+MAIN=${1:-Main}
 export __NIM_REMOTE_BUILD=true
-$OW_COMPILER Main . .
+$OW_COMPILER $MAIN . .
 echo exec > .include
