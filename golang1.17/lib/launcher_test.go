@@ -188,7 +188,7 @@ func TestInvoke(t *testing.T) {
 		},
 		want: wantError,
 	}, {
-		name: "panick: return error",
+		name: "panic: return error",
 		f: func() {
 			panic("test")
 		},
