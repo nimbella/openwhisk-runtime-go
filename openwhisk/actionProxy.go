@@ -179,6 +179,17 @@ func (ap *ActionProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Start creates a proxy to execute actions
 func (ap *ActionProxy) Start(port int) {
+	// Prelaunch a binary if wanted.
+	prestartExecutable := os.Getenv("OW_INIT_IN_ACTIONLOOP")
+	if prestartExecutable != "" {
+		// Propagate the basic environment now to make sure it makes its way into the process.
+		ap.SetEnv(nil)
+		ap.theExecutor = NewExecutor(ap.outFile, ap.errFile, prestartExecutable, ap.env)
+		if err := ap.theExecutor.Start(true); err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	// listen and start
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), ap))
 }

@@ -20,6 +20,7 @@ package openwhisk
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -79,7 +80,6 @@ func (ap *ActionProxy) initHandler(w http.ResponseWriter, r *http.Request) {
 
 	var request initRequest
 	err = json.Unmarshal(body, &request)
-
 	if err != nil {
 		sendError(w, http.StatusBadRequest, fmt.Sprintf("Error unmarshaling request: %v", err))
 		return
@@ -91,6 +91,27 @@ func (ap *ActionProxy) initHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// TODO: LOG_DESTINATIONS is currently not supported in pre-launch mode because of thew way we're
+	// intercepting the streams (or the timing of such rather). Keeping that for a later refactor.
+	if os.Getenv("OW_INIT_IN_ACTIONLOOP") == "" || request.Value.Env["LOG_DESTINATIONS"] != nil {
+		if ap.theExecutor != nil {
+			// Stop the prelaunched binary since we're going to start a fresh one.
+			ap.theExecutor.Stop()
+		}
+		err = ap.scriptBasedInit(request)
+	} else {
+		err = ap.actionloopBasedInit(body)
+	}
+
+	if err != nil {
+		sendError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	ap.initialized = true
+	sendOK(w)
+}
+
+func (ap *ActionProxy) scriptBasedInit(request initRequest) error {
 	// passing the env to the action proxy
 	ap.SetEnv(request.Value.Env)
 
@@ -104,10 +125,10 @@ func (ap *ActionProxy) initHandler(w http.ResponseWriter, r *http.Request) {
 	var buf []byte
 	if request.Value.Binary {
 		Debug("it is binary code")
+		var err error
 		buf, err = base64.StdEncoding.DecodeString(request.Value.Code)
 		if err != nil {
-			sendError(w, http.StatusBadRequest, "cannot decode the request: "+err.Error())
-			return
+			return fmt.Errorf("cannot decode the request: %w", err)
 		}
 	} else {
 		Debug("it is source code")
@@ -115,34 +136,52 @@ func (ap *ActionProxy) initHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// if a compiler is defined try to compile
-	_, err = ap.ExtractAndCompile(&buf, main)
+	_, err := ap.ExtractAndCompile(&buf, main)
 	if err != nil {
 		if os.Getenv("OW_LOG_INIT_ERROR") == "" {
-			sendError(w, http.StatusBadGateway, err.Error())
-		} else {
-			ap.errFile.Write([]byte(err.Error() + "\n"))
-			ap.outFile.Write([]byte(OutputGuard))
-			ap.errFile.Write([]byte(OutputGuard))
-			sendError(w, http.StatusBadGateway, "The action failed to generate or locate a binary. See logs for details.")
+			return fmt.Errorf("cannot initialize action: %w", err)
 		}
-		return
+		ap.errFile.Write([]byte(err.Error() + "\n"))
+		ap.outFile.Write([]byte(OutputGuard))
+		ap.errFile.Write([]byte(OutputGuard))
+		return errors.New("The action failed to generate or locate a binary. See logs for details.")
 	}
 
 	// start an action
 	err = ap.StartLatestAction()
 	if err != nil {
 		if os.Getenv("OW_LOG_INIT_ERROR") == "" {
-			sendError(w, http.StatusBadGateway, "cannot start action: "+err.Error())
-		} else {
-			ap.errFile.Write([]byte(err.Error() + "\n"))
-			ap.outFile.Write([]byte(OutputGuard))
-			ap.errFile.Write([]byte(OutputGuard))
-			sendError(w, http.StatusBadGateway, "Cannot start action. Check logs for details.")
+			return fmt.Errorf("cannot start action: %w", err)
 		}
-		return
+		ap.errFile.Write([]byte(err.Error() + "\n"))
+		ap.outFile.Write([]byte(OutputGuard))
+		ap.errFile.Write([]byte(OutputGuard))
+		return errors.New("Cannot start action. Check logs for details.")
 	}
-	ap.initialized = true
-	sendOK(w)
+	return nil
+}
+
+func (ap *ActionProxy) actionloopBasedInit(request []byte) error {
+	out, err := ap.theExecutor.Interact(request)
+	if err != nil {
+		if os.Getenv("OW_LOG_INIT_ERROR") == "" {
+			return fmt.Errorf("cannot initialize action: %w", err)
+		}
+		ap.errFile.Write([]byte(err.Error() + "\n"))
+		ap.outFile.Write([]byte(OutputGuard))
+		ap.errFile.Write([]byte(OutputGuard))
+		return errors.New("Cannot initialize action. Check logs for details.")
+	}
+
+	var ackData ActionAck
+	if err := json.Unmarshal(out, &ackData); err != nil {
+		return err
+	}
+	if !ackData.Ok {
+		return errors.New("The action did not initialize properly.")
+	}
+
+	return nil
 }
 
 // ExtractAndCompile decode the buffer and if a compiler is defined, compile it also
