@@ -172,7 +172,15 @@ func validate(f interface{}) error {
 //
 // All permutations of the signatures defined in buildArguments and handleReturnValues
 // are supported.
-func invoke(ctx context.Context, f interface{}, in []byte) ([]byte, error) {
+func invoke(ctx context.Context, f interface{}, in []byte) (out []byte, err error) {
+	defer func() {
+		// Transform a panic into an error response.
+		if p := recover(); p != nil {
+			err := fmt.Errorf("function panicked: %v", p)
+			out = []byte(fmt.Sprintf(`{"error":%q}`, err.Error()))
+		}
+	}()
+
 	fun := reflect.ValueOf(f)
 
 	arguments, err := buildArguments(ctx, fun, in)

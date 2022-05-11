@@ -187,6 +187,12 @@ func TestInvoke(t *testing.T) {
 			return TestTypeOut{Bar: in.Foo}, assert.AnError
 		},
 		want: wantError,
+	}, {
+		name: "panic: return error",
+		f: func() {
+			panic("test")
+		},
+		want: []byte(`{"error":"function panicked: test"}`),
 	}}
 
 	for _, tt := range tests {
