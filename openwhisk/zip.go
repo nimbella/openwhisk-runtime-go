@@ -60,8 +60,12 @@ func Unzip(src []byte, dest string) error {
 	os.MkdirAll(dest, 0755)
 	// Closure to address file descriptors issue with all the deferred .Close() methods
 	extractAndWriteFile := func(f *zip.File) error {
-
 		path := filepath.Join(dest, f.Name)
+		// Check for ZipSlip (Directory traversal)
+		if !strings.HasPrefix(path, filepath.Clean(dest)+string(os.PathSeparator)) {
+			return fmt.Errorf("illegal file path: %s", path)
+		}
+
 		isLink := f.FileInfo().Mode()&os.ModeSymlink == os.ModeSymlink
 
 		// dir
