@@ -52,7 +52,7 @@ func TestExecuteParsesEnvAndArgs(t *testing.T) {
 	in := []byte(`{"foo":"baz","value":{"testkey":"testvalue"},"key1":"val1","invalid":1}`)
 	want := []byte(`{"arg":{"testkey":"testvalue"},"env":{"__OW_FOO":"baz","__OW_KEY1":"val1"}}`)
 
-	out, err := execute(f, in, false)
+	out, err := execute(f, nil, in)
 	assert.NoError(t, err)
 	assert.Equal(t, string(want), string(out))
 }
@@ -72,7 +72,7 @@ func TestExecuteParsesDeadline(t *testing.T) {
 	// Rebuilding the time from milliseconds is important for the comparison.
 	want := []byte(fmt.Sprintf(`{"deadline":%q}`, time.UnixMilli(deadline).String()))
 
-	out, err := execute(f, in, false)
+	out, err := execute(f, nil, in)
 	assert.NoError(t, err)
 	assert.Equal(t, string(want), string(out))
 }
@@ -95,7 +95,7 @@ func TestExecuteDefaultsToNoDeadline(t *testing.T) {
 	// We expect an empty object since the deadline should be unset.
 	want := []byte("{}")
 
-	out, err := execute(f, in, false)
+	out, err := execute(f, nil, in)
 	assert.NoError(t, err)
 	assert.Equal(t, string(want), string(out))
 }
@@ -278,25 +278,6 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-func TestIsHttpHandler(t *testing.T) {
-	tests := []struct {
-		name string
-		f    interface{}
-		want bool
-	}{{
-		name: "handler",
-		f:    func(rw http.ResponseWriter, req *http.Request) {},
-		want: true,
-	}}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			is := isHttpHandler(tt.f)
-			assert.Equal(t, tt.want, is)
-		})
-	}
-}
-
 func TestInvokeHttpHandler(t *testing.T) {
 	request := owHttpRequest{
 		Method: "get",
@@ -312,7 +293,7 @@ func TestInvokeHttpHandler(t *testing.T) {
 
 	tests := []struct {
 		name string
-		f    interface{}
+		f    func(http.ResponseWriter, *http.Request)
 		want []byte
 	}{{
 		name: "empty handler",

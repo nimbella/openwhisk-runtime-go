@@ -61,11 +61,14 @@ func main() {
 	defer out.Close()
 	reader := bufio.NewReader(os.Stdin)
 
-	var function interface{}
-	function = Main
+	var function interface{} = Main
+	var httpHandlerFunc http.HandlerFunc
 
-	isHttpHandler := isHttpHandler(function)
-	if !isHttpHandler {
+	if httpFunc, ok := function.(http.HandlerFunc); ok {
+		httpHandlerFunc = httpFunc
+	} else if httpHandler, ok := function.(http.Handler); ok {
+		httpHandlerFunc = httpHandler.ServeHTTP
+	} else {
 		// validate that the function conforms to the supported interfaces
 		if err := validate(function); err != nil {
 			fmt.Fprintf(os.Stderr, "Function does not conform to supported type: %s\n", err.Error())
@@ -93,7 +96,7 @@ func main() {
 		if debug {
 			log.Printf(">>>'%s'>>>", inbuf)
 		}
-		output, err := execute(function, inbuf, isHttpHandler)
+		output, err := execute(function, httpHandlerFunc, inbuf)
 		if err != nil {
 			output = []byte(fmt.Sprintf(`{"error":%q}`, err.Error()))
 		}
@@ -109,7 +112,7 @@ func main() {
 
 // execute parses the input into a value to pass to f and environment to set
 // for the duration of f and calls f with the respective value and environment.
-func execute(f interface{}, in []byte, isHttpHandler bool) ([]byte, error) {
+func execute(f interface{}, httpHandler http.HandlerFunc, in []byte) ([]byte, error) {
 	var input map[string]json.RawMessage
 	if err := json.Unmarshal(in, &input); err != nil {
 		return nil, fmt.Errorf("failed to parse input: %w", err)
@@ -143,10 +146,10 @@ func execute(f interface{}, in []byte, isHttpHandler bool) ([]byte, error) {
 		output []byte
 		err    error
 	)
-	if !isHttpHandler {
+	if httpHandler == nil {
 		output, err = invoke(ctx, f, input["value"])
 	} else {
-		output, err = invokeHttpHandler(ctx, f, input["value"])
+		output, err = invokeHttpHandler(ctx, httpHandler, input["value"])
 	}
 	if err != nil {
 		return nil, err
@@ -295,20 +298,6 @@ func valueToError(val reflect.Value) error {
 	return nil
 }
 
-var httpResponseWriterInterface = reflect.TypeOf((*http.ResponseWriter)(nil)).Elem()
-
-// isHttpHandler returns whether or not the given function looks like a Golang http handler.
-func isHttpHandler(f interface{}) bool {
-	fun := reflect.ValueOf(f)
-	typ := fun.Type()
-
-	if typ.NumIn() == 0 {
-		return false
-	}
-
-	return typ.In(0).Implements(httpResponseWriterInterface)
-}
-
 // owHttpRequest represents the metadata an HTTP request has when it comes via the
 // web invocation path.
 type owHttpRequest struct {
@@ -350,9 +339,7 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 	return r.body.Write(b)
 }
 
-func invokeHttpHandler(ctx context.Context, f interface{}, in []byte) ([]byte, error) {
-	fun := reflect.ValueOf(f)
-
+func invokeHttpHandler(ctx context.Context, f func(http.ResponseWriter, *http.Request), in []byte) ([]byte, error) {
 	// Parse the request.
 	var r owHttpRequest
 	if err := json.Unmarshal(in, &r); err != nil {
@@ -375,7 +362,7 @@ func invokeHttpHandler(ctx context.Context, f interface{}, in []byte) ([]byte, e
 	}
 
 	recorder := &responseRecorder{}
-	fun.Call([]reflect.Value{reflect.ValueOf(recorder), reflect.ValueOf(req)})
+	f(recorder, req)
 
 	headers := make(map[string]string, len(recorder.headers))
 	for k := range recorder.headers {
