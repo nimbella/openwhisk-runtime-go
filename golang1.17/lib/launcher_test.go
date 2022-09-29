@@ -279,7 +279,7 @@ func TestValidate(t *testing.T) {
 }
 
 func TestInvokeHttpHandler(t *testing.T) {
-	request := owHttpRequest{
+	defaultRequest := owHttpRequest{
 		Method: "get",
 		Headers: map[string]string{
 			"Testheader": "Testvalue",
@@ -288,19 +288,20 @@ func TestInvokeHttpHandler(t *testing.T) {
 		Query: "query=test&query2=test2",
 		Body:  "testbody",
 	}
-	requestJson, err := json.Marshal(request)
-	assert.NoError(t, err)
 
 	tests := []struct {
-		name string
-		f    func(http.ResponseWriter, *http.Request)
-		want []byte
+		name    string
+		request owHttpRequest
+		f       func(http.ResponseWriter, *http.Request)
+		want    []byte
 	}{{
-		name: "empty handler",
-		f:    func(rw http.ResponseWriter, req *http.Request) {},
-		want: []byte(`{"body":""}`),
+		name:    "empty handler",
+		request: defaultRequest,
+		f:       func(rw http.ResponseWriter, req *http.Request) {},
+		want:    []byte(`{"body":""}`),
 	}, {
-		name: "handler with all functionality",
+		name:    "handler with all functionality",
+		request: defaultRequest,
 		f: func(rw http.ResponseWriter, req *http.Request) {
 			rw.Header().Add("foo", "bar")
 			rw.WriteHeader(http.StatusNotFound)
@@ -308,7 +309,8 @@ func TestInvokeHttpHandler(t *testing.T) {
 		},
 		want: []byte(`{"headers":{"Foo":"bar"},"statusCode":404,"body":"Hello world!"}`),
 	}, {
-		name: "checking the request",
+		name:    "checking the request",
+		request: defaultRequest,
 		f: func(rw http.ResponseWriter, req *http.Request) {
 			body, err := ioutil.ReadAll(req.Body)
 			assert.NoError(t, err)
@@ -321,10 +323,26 @@ func TestInvokeHttpHandler(t *testing.T) {
 			rw.Write([]byte(req.URL.String()))
 		},
 		want: []byte(`{"headers":{"Testheader":"Testvalue"},"body":"testbody http:///this/is/a/testpath?query=test\u0026query2=test2"}`),
+	}, {
+		name: "handling base64",
+		request: owHttpRequest{
+			Method:          "get",
+			Body:            "aGVsbG8",
+			IsBase64Encoded: true,
+		},
+		f: func(rw http.ResponseWriter, req *http.Request) {
+			body, err := ioutil.ReadAll(req.Body)
+			assert.NoError(t, err)
+			rw.Write(body)
+		},
+		want: []byte(`{"body":"hello"}`),
 	}}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			requestJson, err := json.Marshal(tt.request)
+			assert.NoError(t, err)
+
 			got, err := invokeHttpHandler(context.Background(), tt.f, requestJson)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, got)

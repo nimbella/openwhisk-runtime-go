@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -301,12 +302,13 @@ func valueToError(val reflect.Value) error {
 // owHttpRequest represents the metadata an HTTP request has when it comes via the
 // web invocation path.
 type owHttpRequest struct {
-	Method  string            `json:"__ow_method,omitempty"`
-	Headers map[string]string `json:"__ow_headers,omitempty"`
-	Path    string            `json:"__ow_path,omitempty"`
-	User    string            `json:"__ow_user,omitempty"`
-	Body    string            `json:"__ow_body,omitempty"`
-	Query   string            `json:"__ow_query,omitempty"` // Not available for now.
+	Method          string            `json:"__ow_method,omitempty"`
+	Headers         map[string]string `json:"__ow_headers,omitempty"`
+	Path            string            `json:"__ow_path,omitempty"`
+	User            string            `json:"__ow_user,omitempty"`
+	Body            string            `json:"__ow_body,omitempty"`
+	Query           string            `json:"__ow_query,omitempty"`
+	IsBase64Encoded bool              `json:"__ow_isBase64Encoded,omitempty"`
 }
 
 // owHttpResponse is a response as OW expects it from an action.
@@ -345,18 +347,32 @@ func invokeHttpHandler(ctx context.Context, f func(http.ResponseWriter, *http.Re
 	if err := json.Unmarshal(in, &r); err != nil {
 		return nil, fmt.Errorf("failed to parse request: %w", err)
 	}
-	// Transform it to *http.Request
+
+	// Reconstruct a usable URL.
 	url, err := url.Parse("http://")
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %w", err)
 	}
 	url.Path = r.Path
 	url.RawQuery = r.Query
-	req, err := http.NewRequestWithContext(ctx, r.Method, url.String(), strings.NewReader(r.Body))
+
+	// Handle the body.
+	var body io.Reader
+	if !r.IsBase64Encoded {
+		body = strings.NewReader(r.Body)
+	} else {
+		decoded, err := base64.RawStdEncoding.DecodeString(r.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to base64 decode body: %w", err)
+		}
+		body = bytes.NewReader(decoded)
+	}
+
+	// Construct the request.
+	req, err := http.NewRequestWithContext(ctx, strings.ToUpper(r.Method), url.String(), body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate request: %w", err)
 	}
-
 	for k, v := range r.Headers {
 		req.Header.Add(k, v)
 	}
