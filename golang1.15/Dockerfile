@@ -40,9 +40,14 @@ RUN echo "deb http://deb.debian.org/debian buster-backports main contrib non-fre
     go get -u github.com/go-delve/delve/cmd/dlv &&\
     mkdir /action
 
+# retain nim install during transition to doctl
 ARG NIM_INSTALL_SCRIPT=https://apigcp.nimbella.io/downloads/nim/nim-install-linux.sh
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN curl ${NIM_INSTALL_SCRIPT} | bash
+# install doctl serverless (co-exist with nim temporarily)
+ARG DOCTL_DOWNLOAD=https://no-default.com
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN curl -L ${DOCTL_DOWNLOAD} | tar xzf - && mv doctl /usr/local/bin/doctl && doctl sls install
 
 WORKDIR /action
 ADD proxy /bin/proxy
