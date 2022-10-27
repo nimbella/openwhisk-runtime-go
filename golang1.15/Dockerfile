@@ -40,9 +40,16 @@ RUN echo "deb http://deb.debian.org/debian buster-backports main contrib non-fre
     go get -u github.com/go-delve/delve/cmd/dlv &&\
     mkdir /action
 
-ARG NIM_INSTALL_SCRIPT=https://apigcp.nimbella.io/downloads/nim/nim-install-linux.sh
+# retain nim install during transition to functions-deployer
+ARG NIM_INSTALL_SCRIPT
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN curl ${NIM_INSTALL_SCRIPT} | bash
+# install the functions-deployer (co-exist with nim temporarily)
+ARG DEPLOYER_DOWNLOAD
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN curl -L ${DEPLOYER_DOWNLOAD} | tar xzf - \
+  && rm -fr /usr/local/lib/dosls && mv dosls /usr/local/lib \
+  && rm -f /usr/local/bin/dosls && ln -s /usr/local/lib/dosls/bootstrap /usr/local/bin/dosls
 
 WORKDIR /action
 ADD proxy /bin/proxy
