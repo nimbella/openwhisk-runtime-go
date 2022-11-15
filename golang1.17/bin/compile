@@ -94,27 +94,28 @@ def build(source_dir, target_dir):
     if has_gomod:
         print("detected go.mod file")
     if deps_vendored:
-        print("Detected vendor directory. Will skip downloading and initialization modules.")
+        print("Detected vendor directory. Will skip downloading modules.")
 
     if os.environ.get("__NIM_REMOTE_BUILD"):
-        if has_gomod and not deps_vendored:
+        if has_gomod:
+            if not deps_vendored:
                 print("downloading modules")
                 ret = subprocess.call(["go", "mod", "download"], cwd=source_dir, env=env)
                 if ret != 0:
                     sys.exit(ret)
         else:
-            if not deps_vendored:
-                print("initializing modules")
-                ret = subprocess.call(["go", "mod", "init", "exec"], cwd=source_dir, env=env)
-                if ret != 0:
-                    sys.exit(ret)
+            print("initializing modules")
+            ret = subprocess.call(["go", "mod", "init", "exec"], cwd=source_dir, env=env)
+            if ret != 0:
+                sys.exit(ret)
     else:
         with open(os.devnull, "w") as dn:
             if has_gomod:
-                ret = subprocess.call(["go", "mod", "download"], cwd=source_dir, env=env, stderr=dn, stdout=dn)
-                if ret != 0:
-                    print("cannot download modules")
-                    return
+                if not deps_vendored:
+                    ret = subprocess.call(["go", "mod", "download"], cwd=source_dir, env=env, stderr=dn, stdout=dn)
+                    if ret != 0:
+                        print("cannot download modules")
+                        return
             else:
                 ret = subprocess.call(["go", "mod", "init", "exec"], cwd=source_dir, env=env, stdout=dn, stderr=dn)
                 if ret != 0:
