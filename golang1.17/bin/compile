@@ -97,8 +97,7 @@ def build(source_dir, target_dir):
         print("Detected vendor directory. Will skip downloading and initialization modules.")
 
     if os.environ.get("__NIM_REMOTE_BUILD"):
-        if has_gomod:
-            if not deps_vendored:
+        if has_gomod and not deps_vendored:
                 print("downloading modules")
                 ret = subprocess.call(["go", "mod", "download"], cwd=source_dir, env=env)
                 if ret != 0:
