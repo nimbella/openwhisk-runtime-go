@@ -92,7 +92,7 @@ def build(source_dir, target_dir):
     deps_vendored = exists(vendor)
 
     if has_gomod:
-        print("detected go.mod file")
+        print("Detected go.mod file.")
     if deps_vendored:
         print("Detected vendor directory. Will skip downloading modules.")
 
