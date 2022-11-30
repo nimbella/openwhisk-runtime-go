@@ -35,8 +35,9 @@ import (
 
 // OutputGuard constant string
 const (
-	logSentinel = "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX"
-	OutputGuard = logSentinel + "\n"
+	logSentinel       = "XXX_THE_END_OF_A_WHISK_ACTIVATION_XXX"
+	OutputGuard       = logSentinel + "\n"
+	noSentinelTimeout = 300 * time.Millisecond
 
 	remoteLogNotice = "Logs will be written to the specified remote location. Only errors in doing so will be surfaced here."
 )
@@ -56,9 +57,10 @@ type Executor struct {
 	output *bufio.Reader
 	exited chan bool
 
-	lines         chan logging.LogLine
-	consumeGrp    errgroup.Group
-	remoteLoggers []logging.RemoteLogger
+	lines           chan logging.LogLine
+	consumeGrp      errgroup.Group
+	loggers         []logging.RemoteLogger
+	isRemoteLogging bool
 
 	logout *os.File
 	logerr *os.File
@@ -69,8 +71,6 @@ type Executor struct {
 // You can then start it getting a communication channel
 func NewExecutor(logout *os.File, logerr *os.File, command string, env map[string]string, args ...string) *Executor {
 	cmd := exec.Command(command, args...)
-	cmd.Stdout = logout
-	cmd.Stderr = logerr
 	cmd.Env = []string{}
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
@@ -96,41 +96,37 @@ func NewExecutor(logout *os.File, logerr *os.File, command string, env map[strin
 		exited: make(chan bool),
 		logout: logout,
 		logerr: logerr,
+		// A chunky buffer in order to not block execution of the function from dealing with log lines.
+		lines: make(chan logging.LogLine, 128),
 	}
 
-	e.remoteLoggers, err = logging.RemoteLoggerFromEnv(env)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		fmt.Fprintf(logerr, "Failed to get stdout pipe: %v\n", err)
+		return nil
+	}
+	e.consumeGrp.Go(func() error { return consumeStream("stdout", stdout, e.lines) })
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		fmt.Fprintf(logerr, "Failed to get stderr pipe: %v\n", err)
+		return nil
+	}
+	e.consumeGrp.Go(func() error { return consumeStream("stderr", stderr, e.lines) })
+
+	e.loggers, err = logging.RemoteLoggerFromEnv(env)
 	if err != nil {
 		fmt.Fprintf(logerr, "Failed to setup remote logger: %v\n", err)
 		return nil
 	}
-	if len(e.remoteLoggers) > 0 {
-		if err := e.setupRemoteLogging(); err != nil {
-			fmt.Fprintf(logerr, "Failed to setup remote logging: %v\n", err)
-			return nil
-		}
+	if len(e.loggers) == 0 {
+		// Default to a logger that just forwards all logs to stdout/stderr.
+		e.loggers = []logging.RemoteLogger{&stdioLogger{stdout: logout, stderr: logerr}}
+	} else {
+		e.isRemoteLogging = true
 	}
 
 	return e
-}
-
-func (proc *Executor) setupRemoteLogging() error {
-	// A chunky buffer in order to not block execution of the function from dealing with log lines.
-	proc.lines = make(chan logging.LogLine, 128)
-
-	proc.cmd.Stdout = nil
-	stdout, err := proc.cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to get stdout pipe: %w", err)
-	}
-	proc.consumeGrp.Go(func() error { return consumeStream("stdout", stdout, proc.lines) })
-
-	proc.cmd.Stderr = nil
-	stderr, err := proc.cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("failed to get stderr pipe: %w", err)
-	}
-	proc.consumeGrp.Go(func() error { return consumeStream("stderr", stderr, proc.lines) })
-	return nil
 }
 
 // consumeStream consumes a log stream into the given channel.
@@ -147,18 +143,16 @@ func consumeStream(streamName string, stream io.Reader, ch chan logging.LogLine)
 }
 
 // Interact interacts with the underlying process
-func (proc *Executor) Interact(in []byte) ([]byte, error) {
-	if proc.lines == nil {
-		// Remote logging is not configured. Just roundtrip and return immediately.
-		return proc.roundtrip(in)
+func (proc *Executor) Interact(in []byte, isInit bool) ([]byte, error) {
+	if !isInit {
+		// Don't write a sentinel on init.
+		defer func() {
+			// Write our own sentinels instead of forwarding from the child. This makes sure that any
+			// error logs we might've written are captured correctly.
+			proc.logout.WriteString(OutputGuard)
+			proc.logerr.WriteString(OutputGuard)
+		}()
 	}
-
-	defer func() {
-		// Write our own sentinels instead of forwarding from the child. This makes sure that any
-		// error logs we might've written are captured correctly.
-		proc.logout.WriteString(OutputGuard)
-		proc.logerr.WriteString(OutputGuard)
-	}()
 
 	// Fetch metadata from the incoming parameters
 	var metadata activationMetadata
@@ -166,30 +160,53 @@ func (proc *Executor) Interact(in []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to parse activation metadata: %w", err)
 	}
 
-	var grp errgroup.Group
-	grp.Go(func() error {
-		var sawStdoutSentinel, sawStdErrSentinel bool
-		var errors error
-		for line := range proc.lines {
-			if line.Message == logSentinel {
-				if line.Stream == "stdout" {
-					sawStdoutSentinel = true
-				} else {
-					sawStdErrSentinel = true
-				}
-				if sawStdoutSentinel && sawStdErrSentinel {
-					// We've seen both sentinels. Stop consuming until the next request.
-					return errors
-				}
-				continue
-			}
+	// Spawn a goroutine that collects all of the logs and eventually finds the sentinels.
+	// We buffer the logs heavily to ensure that this goroutine can exit as soon as the sentinels
+	// are seen and thus we can rely on a fairly aggressive timeout on it finishing.
+	logs := make(chan logging.LogLine, 128)
+	logCollectionDone := make(chan struct{})
+	abortLogCollection := make(chan struct{})
+	go func() {
+		defer close(logs)
+		defer close(logCollectionDone)
 
+		var sawStdoutSentinel, sawStdErrSentinel bool
+		for {
+			select {
+			case line := <-proc.lines:
+				if line.Message == logSentinel {
+					if line.Stream == "stdout" {
+						sawStdoutSentinel = true
+					} else {
+						sawStdErrSentinel = true
+					}
+					if sawStdoutSentinel && sawStdErrSentinel {
+						// We've seen both sentinels. Stop consuming until the next request.
+						return
+					}
+					continue
+				}
+				logs <- line
+			case <-abortLogCollection:
+				logs <- logging.LogLine{Time: time.Now(), Stream: "stderr", Message: "There was an error while collecting your logs."}
+				return
+			}
+		}
+	}()
+
+	// Spawn a second goroutine to actually write the logs to the destination.
+	errorChan := make(chan error)
+	go func() {
+		defer close(errorChan)
+
+		var errors error
+		for line := range logs {
 			line.ActivationId = metadata.ActivationId
 
 			// TODO: We probably want to do this in parallel. Opting for a simple implementation
 			// first to close the loop. We might also want to check how common multiple loggers
 			// are to justify the added complexity.
-			for _, logger := range proc.remoteLoggers {
+			for _, logger := range proc.loggers {
 				if err := logger.Send(line); err != nil {
 					// We want to continue consuming all of the logs so we don't exit immediately
 					// but surface the error eventually.
@@ -197,21 +214,34 @@ func (proc *Executor) Interact(in []byte) ([]byte, error) {
 				}
 			}
 		}
-		return errors
-	})
+		errorChan <- errors
+	}()
 
-	proc.logout.WriteString(remoteLogNotice)
-	proc.logout.WriteString("\n")
+	if proc.isRemoteLogging {
+		// Write a logging notice into the default streams if the configured logger is not a
+		// remote logger.
+		proc.logout.WriteString(remoteLogNotice)
+		proc.logout.WriteString("\n")
+	}
+
 	out, err := proc.roundtrip(in)
 
+	// Wait for the sentinels to appear and potentially abort log collection if they don't.
+	select {
+	case <-time.After(noSentinelTimeout):
+		close(abortLogCollection)
+		<-logCollectionDone
+	case <-logCollectionDone:
+	}
+
 	// Wait for the streams to process completely.
-	if err := grp.Wait(); err != nil {
+	if err := <-errorChan; err != nil {
 		fmt.Fprintf(proc.logerr, "Failed to process logs: %s\n", strings.TrimSpace(err.Error()))
 	}
 
 	// Flush any potential leftovers.
 	// TODO: We probably want to do this in parallel. See above on logger.Send.
-	for _, logger := range proc.remoteLoggers {
+	for _, logger := range proc.loggers {
 		if err := logger.Flush(); err != nil {
 			fmt.Fprintf(proc.logerr, "Failed to flush logs: %s\n", strings.TrimSpace(err.Error()))
 		}
@@ -336,4 +366,23 @@ func (proc *Executor) Stop() {
 		proc.consumeGrp.Wait()
 		proc.cmd = nil
 	}
+}
+
+// stdioLogger is a logger that writes the respective lines to stdout/stderr.
+type stdioLogger struct {
+	stdout io.Writer
+	stderr io.Writer
+}
+
+func (l *stdioLogger) Send(line logging.LogLine) error {
+	if line.Stream == "stdout" {
+		fmt.Fprintln(l.stdout, line.Message)
+	} else {
+		fmt.Fprintln(l.stderr, line.Message)
+	}
+	return nil
+}
+
+func (l *stdioLogger) Flush() error {
+	return nil
 }

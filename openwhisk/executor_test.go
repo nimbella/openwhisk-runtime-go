@@ -61,7 +61,7 @@ func ExampleNewExecutor_bc() {
 	proc := NewExecutor(log, log, "_test/bc.sh", m)
 	err := proc.Start(false)
 	fmt.Println(err)
-	res, _ := proc.Interact([]byte("2+2"))
+	res, _ := proc.Interact([]byte("2+2"), false)
 	fmt.Printf("%s", res)
 	proc.Stop()
 	dump(log)
@@ -75,7 +75,7 @@ func ExampleNewExecutor_hello() {
 	proc := NewExecutor(log, log, "_test/hello.sh", m)
 	err := proc.Start(false)
 	fmt.Println(err)
-	res, _ := proc.Interact([]byte(`{"value":{"name":"Mike"}}`))
+	res, _ := proc.Interact([]byte(`{"value":{"name":"Mike"}}`), false)
 	fmt.Printf("%s", res)
 	proc.Stop()
 	dump(log)
@@ -90,7 +90,7 @@ func ExampleNewExecutor_env() {
 	proc := NewExecutor(log, log, "_test/env.sh", map[string]string{"TEST_HELLO": "WORLD", "TEST_HI": "ALL"})
 	err := proc.Start(false)
 	fmt.Println(err)
-	res, _ := proc.Interact([]byte(`{"value":{"name":"Mike"}}`))
+	res, _ := proc.Interact([]byte(`{"value":{"name":"Mike"}}`), false)
 	fmt.Printf("%s", res)
 	proc.Stop()
 	dump(log)
@@ -138,7 +138,7 @@ func ExampleNewExecutor_helloack() {
 	proc := NewExecutor(log, log, "_test/helloack/exec", m)
 	err := proc.Start(true)
 	fmt.Println(err)
-	res, _ := proc.Interact([]byte(`{"value":{"name":"Mike"}}`))
+	res, _ := proc.Interact([]byte(`{"value":{"name":"Mike"}}`), false)
 	fmt.Printf("%s", res)
 	proc.Stop()
 	dump(log)
@@ -153,7 +153,8 @@ func TestExecutorRemoteLogging(t *testing.T) {
 	lines2 := make(chan logging.LogLine, 2)
 	stdout, stderr := testStdoutStderr(t)
 	proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", nil)
-	proc.remoteLoggers = []logging.RemoteLogger{
+	proc.isRemoteLogging = true
+	proc.loggers = []logging.RemoteLogger{
 		testLogger(func(l logging.LogLine) error {
 			l.Time = time.Time{} // Nullify to support comparison below.
 			lines <- l
@@ -165,10 +166,9 @@ func TestExecutorRemoteLogging(t *testing.T) {
 			return nil
 		}),
 	}
-	assert.NoError(t, proc.setupRemoteLogging())
 	assert.NoError(t, proc.Start(true), "failed to launch process")
 
-	_, err := proc.Interact([]byte(`{"value":{"name":"Markus"}, "activation_id": "testid", "action_name": "testaction"}`))
+	_, err := proc.Interact([]byte(`{"value":{"name":"Markus"}, "activation_id": "testid", "action_name": "testaction"}`), false)
 	assert.NoError(t, err, "failed to interact with process")
 
 	// The streams are technically not guaranteed to arrive in order, so we have to
@@ -204,15 +204,15 @@ func TestExecutorRemoteLogging(t *testing.T) {
 func TestExecutorRemoteLoggingError(t *testing.T) {
 	stdout, stderr := testStdoutStderr(t)
 	proc := NewExecutor(stdout, stderr, "_test/remotelogging.sh", nil)
-	proc.remoteLoggers = []logging.RemoteLogger{
+	proc.isRemoteLogging = true
+	proc.loggers = []logging.RemoteLogger{
 		testLogger(func(l logging.LogLine) error {
 			return errors.New("an error")
 		}),
 	}
-	assert.NoError(t, proc.setupRemoteLogging())
 	assert.NoError(t, proc.Start(true), "failed to launch process")
 
-	_, err := proc.Interact([]byte(`{"value":{"name":"Markus"}}`))
+	_, err := proc.Interact([]byte(`{"value":{"name":"Markus"}}`), false)
 	assert.NoError(t, err, "failed to interact with process")
 
 	proc.Stop()
