@@ -229,7 +229,7 @@ func (proc *Executor) roundtrip(in []byte) ([]byte, error) {
 	go func() {
 		out, err := proc.output.ReadBytes('\n')
 		if err == nil {
-			chout <- out
+			chout <- out[:len(out)-1] // Drop the last byte, which we know is a newline.
 		} else {
 			chout <- []byte{}
 		}
