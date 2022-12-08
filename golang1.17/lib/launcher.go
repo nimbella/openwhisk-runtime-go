@@ -206,6 +206,9 @@ func buildArguments(ctx context.Context, f reflect.Value, in []byte) ([]reflect.
 		return nil, nil
 	}
 
+	// Only build the context if the customer provided enough parameters in their function to require one.
+	ctx = buildContext(ctx)
+
 	if numArgs == 2 {
 		// We know that the first argument must be the context and the second the value here.
 		val := reflect.New(typ.In(1)).Interface()
@@ -225,6 +228,37 @@ func buildArguments(ctx context.Context, f reflect.Value, in []byte) ([]reflect.
 		return nil, fmt.Errorf("failed to unmarshal input value: %w", err)
 	}
 	return []reflect.Value{reflect.ValueOf(val).Elem()}, nil
+}
+
+// buildContext takes the context that is being used to invoke the user's function and adds the "context" data to it.
+//
+// Go's convention for contexts is to define a struct in the package you want to build contexts from and use a constant
+// instance of that struct as the key and define an exported function that other packages can use to retrieve a struct
+// with the data you want to convey from the context.
+// See https://github.com/aws/aws-lambda-go/blob/main/lambdacontext/context.go for an example of this.
+// If you need more than one key per package, you can define a struct type that you can put something like a string in
+// so that you can differentiate constant instances of the structs.
+// See https://github.com/golang/go/blob/master/src/net/http/server.go for an example of this.
+//
+// At DO, we don't yet offer a library our users can import as they write their functions, so we can't follow this
+// pattern right now. Therefore, the naming convention we use for our context keys doesn't matter. In the future, we can
+// change this by creating a library that our customers can use, at which point we will no longer have multiple context
+// keys and the single remaining context key will no longer be a string. Therefore, while we do need to communicate
+// these string keys to our customers for now, the naming convention we use for the strings doesn't matter. We've chosen
+// this-case arbitrarily.
+func buildContext(ctx context.Context) context.Context {
+	// Unlike other programming languages we provide runtimes for, deadline is skipped because Go already has the
+	// built-in context deadlines, so our customers already have a way (which is better than if we added a value here)
+	// of retrieving the deadline.
+	ctx = context.WithValue(ctx, "function-name", os.Getenv("__OW_ACTION_NAME"))
+	ctx = context.WithValue(ctx, "function-version", os.Getenv("__OW_ACTION_VERSION"))
+	ctx = context.WithValue(ctx, "activation-id", os.Getenv("__OW_ACTIVATION_ID"))
+	ctx = context.WithValue(ctx, "request-id", os.Getenv("__OW_TRANSACTION_ID"))
+	ctx = context.WithValue(ctx, "api-host", os.Getenv("__OW_API_HOST"))
+	ctx = context.WithValue(ctx, "api-key", os.Getenv("__OW_API_KEY"))
+	ctx = context.WithValue(ctx, "namespace", os.Getenv("__OW_NAMESPACE"))
+
+	return ctx
 }
 
 // handleReturnValues handles the values returned from a reflected function's call.

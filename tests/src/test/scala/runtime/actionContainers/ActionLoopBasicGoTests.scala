@@ -100,6 +100,29 @@ abstract class ActionLoopBasicGoTests
       |}
     """.stripMargin)
 
+  val testContext = TestConfig(
+    """
+      |package main
+      |import (
+      | "context"
+      | "os"
+      |)
+      |func Main(context.Context) map[string]interface{} {
+      |	res := make(map[string]interface{})
+      |
+      | functionName, _ := ctx.Value("function-name")
+      |
+      |	res["api_host"] = os.Getenv("__OW_API_HOST")
+      |	res["api_key"] = os.Getenv("__OW_API_KEY")
+      |	res["namespace"] = os.Getenv("__OW_NAMESPACE")
+      |	res["action_name"] = functionName
+      |	res["action_version"] = os.Getenv("__OW_ACTION_VERSION")
+      |	res["activation_id"] = os.Getenv("__OW_ACTIVATION_ID")
+      |	res["deadline"] = os.Getenv("__OW_DEADLINE")
+      |	return res
+      |}
+    """.stripMargin)
+
   override val testEnvParameters = TestConfig(
     """
       |package main
