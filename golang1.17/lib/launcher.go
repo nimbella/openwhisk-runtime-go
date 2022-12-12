@@ -252,7 +252,7 @@ func buildContext() (context.Context, context.CancelFunc, error) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to parse deadline: %w", err)
 		}
-		ctx, cancel = context.WithDeadline(context.Background(), time.UnixMilli(deadlineMillis))
+		ctx, cancel = context.WithDeadline(ctx, time.UnixMilli(deadlineMillis))
 	}
 
 	// Unlike other programming languages we provide runtimes for, deadline is skipped because Go already has the
