@@ -56,7 +56,7 @@ func (ap *ActionProxy) runHandler(w http.ResponseWriter, r *http.Request) {
 
 	// check if you have an action
 	if ap.theExecutor == nil {
-		sendError(w, http.StatusInternalServerError, fmt.Sprintf("no action defined yet"))
+		sendError(w, http.StatusInternalServerError, fmt.Sprintf("no function defined yet"))
 		return
 	}
 	// check if the process exited
@@ -84,7 +84,7 @@ func (ap *ActionProxy) runHandler(w http.ResponseWriter, r *http.Request) {
 	var objmap map[string]*json.RawMessage
 	err = json.Unmarshal(response, &objmap)
 	if err != nil {
-		sendError(w, http.StatusBadGateway, "The action did not return a dictionary.")
+		sendError(w, http.StatusBadGateway, "The function did not return a dictionary.")
 		return
 	}
 

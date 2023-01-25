@@ -70,7 +70,7 @@ func NewActionProxy(baseDir string, compiler string, outFile *os.File, errFile *
 	}
 }
 
-//SetEnv sets the environment
+// SetEnv sets the environment
 func (ap *ActionProxy) SetEnv(env map[string]interface{}) {
 	// Propagate some basic runtime environment
 	ap.env["HOME"] = os.Getenv("HOME")
@@ -121,7 +121,7 @@ func (ap *ActionProxy) StartLatestAction() error {
 	if highestDir == 0 {
 		Debug("no action found")
 		ap.theExecutor = nil
-		return fmt.Errorf("no valid actions available")
+		return fmt.Errorf("no valid functions available")
 	}
 
 	// check version

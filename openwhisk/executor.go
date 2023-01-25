@@ -239,7 +239,7 @@ func (proc *Executor) roundtrip(in []byte) ([]byte, error) {
 	select {
 	case out = <-chout:
 		if len(out) == 0 {
-			err = errors.New("no answer from the action")
+			err = errors.New("no answer from the function")
 		}
 	case <-proc.exited:
 		err = errors.New("command exited")
@@ -311,7 +311,7 @@ func (proc *Executor) Start(waitForAck bool) error {
 		}
 		// check ack
 		if !ackData.Ok {
-			ack <- fmt.Errorf("The action did not initialize properly.")
+			ack <- fmt.Errorf("The function did not initialize properly.")
 			return
 		}
 		ack <- nil

@@ -55,7 +55,7 @@ func (ap *ActionProxy) initHandler(w http.ResponseWriter, r *http.Request) {
 
 	// you can do multiple initializations when debugging
 	if ap.initialized && !Debugging {
-		msg := "Cannot initialize the action more than once."
+		msg := "Cannot initialize the function more than once."
 		sendError(w, http.StatusForbidden, msg)
 		log.Println(msg)
 		return
@@ -139,24 +139,24 @@ func (ap *ActionProxy) scriptBasedInit(request initRequest) error {
 	_, err := ap.ExtractAndCompile(&buf, main)
 	if err != nil {
 		if os.Getenv("OW_LOG_INIT_ERROR") == "" {
-			return fmt.Errorf("cannot initialize action: %w", err)
+			return fmt.Errorf("cannot initialize function: %w", err)
 		}
 		ap.errFile.Write([]byte(err.Error() + "\n"))
 		ap.outFile.Write([]byte(OutputGuard))
 		ap.errFile.Write([]byte(OutputGuard))
-		return errors.New("The action failed to generate or locate a binary. See logs for details.")
+		return errors.New("The function failed to generate or locate a binary. See logs for details.")
 	}
 
 	// start an action
 	err = ap.StartLatestAction()
 	if err != nil {
 		if os.Getenv("OW_LOG_INIT_ERROR") == "" {
-			return fmt.Errorf("cannot start action: %w", err)
+			return fmt.Errorf("cannot start function: %w", err)
 		}
 		ap.errFile.Write([]byte(err.Error() + "\n"))
 		ap.outFile.Write([]byte(OutputGuard))
 		ap.errFile.Write([]byte(OutputGuard))
-		return errors.New("Cannot start action. Check logs for details.")
+		return errors.New("Cannot start function. Check logs for details.")
 	}
 	return nil
 }
@@ -165,12 +165,12 @@ func (ap *ActionProxy) actionloopBasedInit(request []byte) error {
 	out, err := ap.theExecutor.Interact(request)
 	if err != nil {
 		if os.Getenv("OW_LOG_INIT_ERROR") == "" {
-			return fmt.Errorf("cannot initialize action: %w", err)
+			return fmt.Errorf("cannot initialize function: %w", err)
 		}
 		ap.errFile.Write([]byte(err.Error() + "\n"))
 		ap.outFile.Write([]byte(OutputGuard))
 		ap.errFile.Write([]byte(OutputGuard))
-		return errors.New("Cannot initialize action. Check logs for details.")
+		return errors.New("Cannot initialize function. Check logs for details.")
 	}
 
 	var ackData ActionAck
@@ -178,7 +178,7 @@ func (ap *ActionProxy) actionloopBasedInit(request []byte) error {
 		return err
 	}
 	if !ackData.Ok {
-		return errors.New("The action did not initialize properly.")
+		return errors.New("The function did not initialize properly.")
 	}
 
 	return nil
