@@ -35,6 +35,9 @@ RUN apt-get update \
   && mkdir /action
 WORKDIR /action
 
+# This precompiles the standard library to make the build much quicker.
+RUN GODEBUG=installgoroot=all go install -a std
+
 COPY proxy /bin/proxy
 COPY bin/compile /bin/compile
 COPY lib/launcher.go /lib/launcher.go
