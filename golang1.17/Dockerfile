@@ -18,8 +18,10 @@
 # Do not fix the patch level for golang:1.17 to automatically get security fixes.
 FROM golang:1.17-buster
 
-RUN echo "deb http://deb.debian.org/debian buster-backports main contrib non-free" \
+RUN echo "deb http://archive.debian.org/debian buster-backports main contrib non-free" \
      >>/etc/apt/sources.list &&\
+    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 0E98404D386FA1D9 &&\
+    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 6ED0E7B82643E131 &&\
     echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections &&\
     apt-get update &&\
     # Upgrade installed packages to get latest security fixes if the base image does not contain them already.
