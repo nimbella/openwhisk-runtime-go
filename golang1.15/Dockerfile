@@ -18,15 +18,15 @@
 # Do not fix the patch level for golang:1.15 to automatically get security fixes.
 FROM golang:1.15
 
-RUN echo "deb http://archive.debian.org/debian buster-backports main contrib non-free" \
-     >>/etc/apt/sources.list &&\
-    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 0E98404D386FA1D9 &&\
-    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 6ED0E7B82643E131 &&\
-    echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections &&\
-    apt-get update &&\
+RUN echo "deb http://archive.debian.org/debian buster main contrib non-free" > /etc/apt/sources.list && \
+    echo "deb http://archive.debian.org/debian-security buster/updates main contrib non-free" >> /etc/apt/sources.list && \
+    echo "deb http://archive.debian.org/debian buster-backports main contrib non-free" >> /etc/apt/sources.list && \
+    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys AED4B06F473041FA && \
+    echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections && \
+    apt-get update && \
     # Upgrade installed packages to get latest security fixes if the base image does not contain them already.
-    apt-get upgrade -y --no-install-recommends &&\
-    apt-get install -y apt-utils &&\
+    apt-get upgrade -y --no-install-recommends && \
+    apt-get install -y apt-utils && \
     apt-get install -y \
      curl \
      jq \
