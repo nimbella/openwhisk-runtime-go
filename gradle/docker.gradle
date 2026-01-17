@@ -6,7 +6,7 @@
  * (the "License"); you may not use this file except in compliance with
  * the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,13 +29,13 @@ import groovy.time.*
  * - dockerRegistry (optional): The registry to push to
  * - dockerImageTag (optional, default 'latest'): The tag for the image
  * - dockerImagePrefix (optional, default 'whisk'): The prefix for the image,
- *       'controller' becomes 'whisk/controller' per default
+ * 'controller' becomes 'whisk/controller' per default
  * - dockerTimeout (optional, default 840): Timeout for docker operations in seconds
  * - dockerRetries (optional, default 3): How many times to retry docker operations
  * - dockerBinary (optional, default 'docker'): The binary to execute docker commands
  * - dockerBuildArgs (options, default ''): Project specific custom docker build arguments
  * - dockerHost (optional): The docker host to run commands on, default behaviour is
- *       docker's own DOCKER_HOST environment variable
+ * docker's own DOCKER_HOST environment variable
  */
 
 ext {
@@ -54,7 +54,10 @@ if(project.hasProperty('dockerHost')) {
 }
 
 if(project.hasProperty('dockerBuildArgs')) {
-    dockerBuildArgs.each { arg  ->
+    // MODIFIED: Ensure we treat strings from the CLI as a single item list
+    // to prevent character-by-character iteration.
+    def argsList = project.dockerBuildArgs instanceof String ? [project.dockerBuildArgs] : project.dockerBuildArgs
+    argsList.each { arg  ->
         dockerBuildArg += ['--build-arg', arg]
     }
 }

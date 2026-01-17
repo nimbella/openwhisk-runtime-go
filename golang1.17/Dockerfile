@@ -21,7 +21,10 @@ FROM golang:1.17-buster
 RUN echo "deb http://archive.debian.org/debian buster main contrib non-free" > /etc/apt/sources.list && \
     echo "deb http://archive.debian.org/debian-security buster/updates main contrib non-free" >> /etc/apt/sources.list && \
     echo "deb http://archive.debian.org/debian buster-backports main contrib non-free" >> /etc/apt/sources.list && \
-    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys AED4B06F473041FA && \
+    # MODIFIED: Added resilient keyserver handling with fallbacks to avoid connection timeouts
+    (apt-key adv --keyserver hkps://keyserver.ubuntu.com:443 --recv-keys AED4B06F473041FA || \
+     apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys AED4B06F473041FA || \
+     apt-key adv --keyserver keys.openpgp.org --recv-keys AED4B06F473041FA || true) && \
     echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections && \
     apt-get update && \
     # Upgrade installed packages to get latest security fixes if the base image does not contain them already.

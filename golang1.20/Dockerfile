@@ -25,8 +25,9 @@ RUN curl -L ${DEPLOYER_DOWNLOAD} | tar xzf - \
   && rm -fr /usr/local/lib/dosls && mv dosls /usr/local/lib \
   && rm -f /usr/local/bin/dosls && ln -s /usr/local/lib/dosls/bootstrap /usr/local/bin/dosls
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
+# MODIFIED: Added Acquire::Retries=3 to handle transient network issues during package installation
+RUN apt-get -o Acquire::Retries=3 update \
+  && apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
     # For tests, mostly.
     jq \
     # To run the compile script.
