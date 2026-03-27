@@ -14,18 +14,27 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 buildscript {
     repositories {
-        jcenter()
+        mavenCentral()
+        gradlePluginPortal()
     }
     dependencies {
-        classpath "cz.alenkacz:gradle-scalafmt:${gradle.scalafmt.version}"
+        // Correct coordinates for modern Scalafmt plugin
+        classpath "cz.alenkacz.gradle.scalafmt:cz.alenkacz.gradle.scalafmt.gradle.plugin:${gradle.scalafmt.version}"
     }
 }
 
 subprojects {
-    apply plugin: 'scalafmt'
-    scalafmt.configFilePath = gradle.scalafmt.config
-}
+    // Only apply the plugin to projects that actually use Scala (like the 'tests' project)
+    plugins.withId('scala') {
+        apply plugin: 'cz.alenkacz.gradle.scalafmt'
+        scalafmt.configFilePath = gradle.scalafmt.config
+    }
 
+    // Optional: Keep support for the manual property
+    if (project.hasProperty('scalafmt')) {
+        apply plugin: 'cz.alenkacz.gradle.scalafmt'
+        scalafmt.configFilePath = gradle.scalafmt.config
+    }
+}
